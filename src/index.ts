@@ -16,12 +16,15 @@ export {
   parseUnifiedAddress,
   validateAddressDetailed,
   getAddressPrefixes,
+  setValidationOptions,
+  resetValidationOptions,
 } from './address-validator.js';
 
 export type {
   AddressType,
   UnifiedAddressComponents,
   AddressValidationResult,
+  AddressValidationOptions,
 } from './address-validator.js';
 
 // =============================================================================

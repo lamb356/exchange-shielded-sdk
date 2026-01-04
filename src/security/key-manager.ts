@@ -122,10 +122,26 @@ const ENCRYPTION = {
   IV_LENGTH: 16,
   AUTH_TAG_LENGTH: 16,
   SALT_LENGTH: 32,
-  SCRYPT_N: 16384,
+  SCRYPT_N: 16384, // 2^14 - minimum secure value. Increase for high-security production environments
   SCRYPT_R: 8,
   SCRYPT_P: 1,
 } as const;
+/**
+ * Promisified scrypt with N, r, p parameters for production security
+ */
+function scryptWithOptions(
+  password: string,
+  salt: Buffer,
+  keylen: number
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, keylen, { N: ENCRYPTION.SCRYPT_N, r: ENCRYPTION.SCRYPT_R, p: ENCRYPTION.SCRYPT_P }, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey);
+    });
+  });
+}
+
 
 /**
  * Secure Key Manager
@@ -287,10 +303,10 @@ export class SecureKeyManager {
    *
    * @param keyId - ID of the key to use for signing
    * @param txData - Transaction data to sign
-   * @returns The signature
+   * @returns A SHA-256 digest (NOT a valid Zcash signature)
    * @throws KeyManagerError if key not found
    */
-  signTransaction(keyId: string, txData: Buffer): Buffer {
+  createTransactionDigest(keyId: string, txData: Buffer): Buffer {
     const keyData = this.keys.get(keyId);
 
     if (!keyData) {
@@ -427,7 +443,7 @@ export class SecureKeyManager {
     const iv = randomBytes(ENCRYPTION.IV_LENGTH);
 
     // Derive encryption key from password
-    const derivedKey = (await scryptAsync(password, salt, ENCRYPTION.KEY_LENGTH)) as Buffer;
+    const derivedKey = await scryptWithOptions(password, salt, ENCRYPTION.KEY_LENGTH);
 
     // Encrypt the key
     const cipher = createCipheriv(ENCRYPTION.ALGORITHM, derivedKey, iv);
@@ -462,7 +478,7 @@ export class SecureKeyManager {
     );
 
     // Derive decryption key from password
-    const derivedKey = (await scryptAsync(password, salt, ENCRYPTION.KEY_LENGTH)) as Buffer;
+    const derivedKey = await scryptWithOptions(password, salt, ENCRYPTION.KEY_LENGTH);
 
     // Decrypt
     const decipher = createDecipheriv(ENCRYPTION.ALGORITHM, derivedKey, iv);

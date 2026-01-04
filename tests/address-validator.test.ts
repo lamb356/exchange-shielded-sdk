@@ -1,5 +1,8 @@
 /**
  * Tests for Address Validator Module
+ *
+ * Note: Most tests use skipChecksum mode for format validation testing.
+ * Production code validates real checksums by default.
  */
 
 import {
@@ -8,10 +11,20 @@ import {
   parseUnifiedAddress,
   validateAddressDetailed,
   getAddressPrefixes,
+  setValidationOptions,
+  resetValidationOptions,
   AddressType,
 } from '../src/address-validator.js';
 
 describe('AddressValidator', () => {
+  // Use format-only validation for most tests (fake addresses don't have valid checksums)
+  beforeAll(() => {
+    setValidationOptions({ skipChecksum: true });
+  });
+
+  afterAll(() => {
+    resetValidationOptions();
+  });
   describe('validateAddress', () => {
     describe('Transparent addresses (t1/t3)', () => {
       it('should validate mainnet P2PKH address (t1)', () => {
@@ -183,7 +196,8 @@ describe('AddressValidator', () => {
         'u1qw508d6qejxtdg4y5r3zarvary0c5xw7kg3g4ty6q8n7qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk7cyxv';
       const components = parseUnifiedAddress(address);
 
-      expect(components.orchard).toBe(true);
+      expect(components.unified).toBe(true);
+      expect(components.receivers).toBe('unknown');
       expect(components.sapling).toBeUndefined();
       expect(components.transparent).toBeUndefined();
     });
@@ -280,7 +294,7 @@ describe('AddressValidator', () => {
 
       expect(result.valid).toBe(false);
       expect(result.type).toBe('unknown');
-      expect(result.error).toBe('Unrecognized address format');
+      expect(result.error).toBe('Unrecognized address format or invalid checksum');
     });
   });
 

@@ -97,5 +97,9 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "bech32": "^2.0.0",
+    "bs58check": "^4.0.0"
   }
 }

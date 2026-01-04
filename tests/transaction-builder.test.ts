@@ -16,6 +16,16 @@ import {
   ZSendmanyRequest,
   FeeEstimateOptions,
 } from '../src/transaction-builder.js';
+import { setValidationOptions, resetValidationOptions } from '../src/address-validator.js';
+
+// Use format-only validation for tests (fake addresses don't have valid checksums)
+beforeAll(() => {
+  setValidationOptions({ skipChecksum: true });
+});
+
+afterAll(() => {
+  resetValidationOptions();
+});
 
 describe('ZIP317 Fee Estimation', () => {
   describe('calculateTransparentActions', () => {

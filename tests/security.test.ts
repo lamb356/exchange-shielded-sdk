@@ -18,6 +18,16 @@ import {
   memoHexToText,
   redactSensitiveData,
 } from '../src/security/index.js';
+import { setValidationOptions, resetValidationOptions } from '../src/address-validator.js';
+
+// Use format-only validation for tests (fake addresses don't have valid checksums)
+beforeAll(() => {
+  setValidationOptions({ skipChecksum: true });
+});
+
+afterAll(() => {
+  resetValidationOptions();
+});
 
 describe('SecureKeyManager', () => {
   let keyManager: SecureKeyManager;
@@ -104,7 +114,7 @@ describe('SecureKeyManager', () => {
       keyManager.loadRawKey('sign-key', rawKey, 'sapling');
 
       const txData = Buffer.from('transaction data');
-      const signature = keyManager.signTransaction('sign-key', txData);
+      const signature = keyManager.createTransactionDigest('sign-key', txData);
 
       expect(signature).toBeInstanceOf(Buffer);
       expect(signature.length).toBe(32); // SHA-256 hash
@@ -114,7 +124,7 @@ describe('SecureKeyManager', () => {
       const txData = Buffer.from('transaction data');
 
       expect(() => {
-        keyManager.signTransaction('unknown-key', txData);
+        keyManager.createTransactionDigest('unknown-key', txData);
       }).toThrow(KeyManagerError);
     });
 
@@ -126,7 +136,7 @@ describe('SecureKeyManager', () => {
       expect(before?.lastUsedAt).toBeUndefined();
 
       const txData = Buffer.from('transaction data');
-      keyManager.signTransaction('timing-key', txData);
+      keyManager.createTransactionDigest('timing-key', txData);
 
       const after = keyManager.getKeyMetadata('timing-key');
       expect(after?.lastUsedAt).toBeDefined();

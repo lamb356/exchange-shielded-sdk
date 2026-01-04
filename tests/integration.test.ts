@@ -8,7 +8,18 @@ import {
   ExchangeShieldedSDK,
   createExchangeSDK,
   AuditEventType,
+  setValidationOptions,
+  resetValidationOptions,
 } from '../src/index.js';
+
+// Use format-only validation for tests (fake addresses don't have valid checksums)
+beforeAll(() => {
+  setValidationOptions({ skipChecksum: true });
+});
+
+afterAll(() => {
+  resetValidationOptions();
+});
 
 // Mock fetch for RPC calls
 const createMockFetch = (responses: Record<string, unknown> = {}) => {
