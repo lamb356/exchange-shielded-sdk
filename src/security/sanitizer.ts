@@ -11,6 +11,19 @@
 import { validateAddress, AddressType } from '../address-validator.js';
 
 /**
+ * Error thrown when input validation fails
+ */
+export class ValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string
+  ) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+/**
  * Result of address sanitization
  */
 export interface SanitizedAddress {
@@ -211,13 +224,25 @@ export function sanitizeAddress(input: string): SanitizedAddress {
 }
 
 /**
+ * Regular expression for valid amount strings
+ * Allows: optional leading minus, digits, optional decimal point with digits
+ * Examples: "1", "1.5", "0.00001", "-1.5"
+ * Does NOT allow: scientific notation (1e2), multiple decimals, trailing/leading dots only
+ */
+const VALID_AMOUNT_REGEX = /^-?(?:\d+\.?\d*|\d*\.?\d+)$/;
+
+/**
  * Sanitizes an amount value
  *
  * Validates and sanitizes the input amount, ensuring it's a valid
  * positive number within reasonable bounds.
  *
+ * SECURITY: This function THROWS on invalid input to prevent silent data mangling.
+ * Previously, inputs like "1e2" were silently converted to "12" which is dangerous.
+ *
  * @param input - The amount to sanitize (can be string or number)
  * @returns Sanitization result with cleaned amount or error
+ * @throws ValidationError if the input format is invalid (scientific notation, malformed strings, etc.)
  *
  * @example
  * ```typescript
@@ -252,11 +277,33 @@ export function sanitizeAmount(input: unknown): SanitizedAmount {
       };
     }
 
-    // Remove any non-numeric characters except . and -
-    const cleaned = trimmed.replace(/[^0-9.\-]/g, '');
+    // SECURITY: Reject malformed amount strings - DO NOT silently mangle
+    // This prevents "1e2" -> "12", "1-2" -> "12", etc.
+    if (!VALID_AMOUNT_REGEX.test(trimmed)) {
+      throw new ValidationError(
+        `Invalid amount format: "${trimmed}". Amount must be a plain decimal number (no scientific notation, special characters, or malformed input).`,
+        'INVALID_AMOUNT_FORMAT'
+      );
+    }
 
-    numValue = parseFloat(cleaned);
+    numValue = parseFloat(trimmed);
   } else if (typeof input === 'number') {
+    // Check for NaN first
+    if (isNaN(input)) {
+      throw new ValidationError(
+        'Amount cannot be NaN',
+        'INVALID_AMOUNT_NAN'
+      );
+    }
+
+    // Check for Infinity
+    if (!isFinite(input)) {
+      throw new ValidationError(
+        'Amount cannot be Infinity',
+        'INVALID_AMOUNT_INFINITY'
+      );
+    }
+
     numValue = input;
   } else {
     return {
@@ -266,7 +313,7 @@ export function sanitizeAmount(input: unknown): SanitizedAmount {
     };
   }
 
-  // Check for NaN
+  // Check for NaN (can happen from parseFloat)
   if (isNaN(numValue)) {
     return {
       amount: 0,

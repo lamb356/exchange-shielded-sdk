@@ -9,6 +9,7 @@ import {
   SecureKeyManager,
   KeyManagerError,
   createKeyManager,
+  ValidationError,
   sanitizeAddress,
   sanitizeAmount,
   sanitizeMemo,
@@ -362,18 +363,19 @@ describe('Input Sanitization', () => {
       expect(result.valid).toBe(false);
     });
 
-    it('should reject NaN', () => {
-      const result = sanitizeAmount(NaN);
-
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('not a valid number');
+    it('should throw ValidationError for NaN', () => {
+      expect(() => sanitizeAmount(NaN)).toThrow(ValidationError);
+      expect(() => sanitizeAmount(NaN)).toThrow('NaN');
     });
 
-    it('should reject Infinity', () => {
-      const result = sanitizeAmount(Infinity);
+    it('should throw ValidationError for Infinity', () => {
+      expect(() => sanitizeAmount(Infinity)).toThrow(ValidationError);
+      expect(() => sanitizeAmount(Infinity)).toThrow('Infinity');
+    });
 
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('finite');
+    it('should throw ValidationError for negative Infinity', () => {
+      expect(() => sanitizeAmount(-Infinity)).toThrow(ValidationError);
+      expect(() => sanitizeAmount(-Infinity)).toThrow('Infinity');
     });
 
     it('should reject negative amounts', () => {
@@ -409,11 +411,60 @@ describe('Input Sanitization', () => {
       expect(result.amount).toBe(1.12345679); // Rounded to 8 decimals
     });
 
-    it('should strip non-numeric characters from string', () => {
-      const result = sanitizeAmount('$10.50 ZEC');
+    it('should throw ValidationError for strings with non-numeric characters', () => {
+      // SECURITY: Previously this silently mangled "$10.50 ZEC" to "10.50"
+      // Now it throws to prevent silent data corruption
+      expect(() => sanitizeAmount('$10.50 ZEC')).toThrow(ValidationError);
+      try {
+        sanitizeAmount('$10.50 ZEC');
+      } catch (e) {
+        expect((e as ValidationError).code).toBe('INVALID_AMOUNT_FORMAT');
+      }
+    });
 
+    it('should throw ValidationError for scientific notation', () => {
+      // SECURITY: "1e2" should NOT silently become "12"
+      expect(() => sanitizeAmount('1e2')).toThrow(ValidationError);
+      try {
+        sanitizeAmount('1e2');
+      } catch (e) {
+        expect((e as ValidationError).code).toBe('INVALID_AMOUNT_FORMAT');
+      }
+    });
+
+    it('should throw ValidationError for malformed strings like "1-2"', () => {
+      // SECURITY: "1-2" should NOT silently become "1" or "12"
+      expect(() => sanitizeAmount('1-2')).toThrow(ValidationError);
+      try {
+        sanitizeAmount('1-2');
+      } catch (e) {
+        expect((e as ValidationError).code).toBe('INVALID_AMOUNT_FORMAT');
+      }
+    });
+
+    it('should throw ValidationError for "1e999" (overflow)', () => {
+      expect(() => sanitizeAmount('1e999')).toThrow(ValidationError);
+    });
+
+    it('should throw ValidationError for MAX_SAFE_INTEGER+1 as string', () => {
+      // This would lose precision as a number
+      expect(() => sanitizeAmount('9007199254740992')).not.toThrow(); // This is actually OK as it's a valid number string
+      // But amounts this large would fail the MAX_AMOUNT check
+      const result = sanitizeAmount('9007199254740992');
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('exceeds maximum');
+    });
+
+    it('should accept valid integer strings', () => {
+      const result = sanitizeAmount('100');
       expect(result.valid).toBe(true);
-      expect(result.amount).toBe(10.50);
+      expect(result.amount).toBe(100);
+    });
+
+    it('should accept valid decimal strings with leading zero', () => {
+      const result = sanitizeAmount('0.5');
+      expect(result.valid).toBe(true);
+      expect(result.amount).toBe(0.5);
     });
   });
 

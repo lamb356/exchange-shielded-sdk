@@ -22,6 +22,7 @@ export type {
 
 // Sanitizer exports
 export {
+  ValidationError,
   sanitizeAddress,
   sanitizeAmount,
   sanitizeMemo,
