@@ -187,6 +187,15 @@ export class ExchangeShieldedSDK {
   private readonly pendingOperations: Map<string, { userId: string; requestId?: string }>;
 
   /**
+   * Request ID cache for idempotency
+   *
+   * SECURITY: Prevents double-withdrawals when clients retry failed requests.
+   * If a requestId has already been processed, the cached result is returned
+   * instead of processing the withdrawal again.
+   */
+  private readonly requestIdCache: Map<string, WithdrawalResult>;
+
+  /**
    * Creates a new ExchangeShieldedSDK
    *
    * @param config - SDK configuration
@@ -219,6 +228,9 @@ export class ExchangeShieldedSDK {
 
     // Initialize pending operations tracking
     this.pendingOperations = new Map();
+
+    // Initialize request ID cache for idempotency
+    this.requestIdCache = new Map();
   }
 
   /**
@@ -238,6 +250,26 @@ export class ExchangeShieldedSDK {
    */
   async processWithdrawal(request: WithdrawalRequest): Promise<WithdrawalResult> {
     const requestId = request.requestId ?? this.generateRequestId();
+
+    // IDEMPOTENCY CHECK: If this requestId has already been processed, return cached result
+    // This prevents double-withdrawals when clients retry failed network requests
+    const cachedResult = this.requestIdCache.get(requestId);
+    if (cachedResult !== undefined) {
+      // Log that we returned a cached result
+      if (this.config.enableAuditLogging !== false) {
+        this.auditLogger.log({
+          eventType: AuditEventType.WITHDRAWAL_REQUESTED,
+          severity: AuditSeverity.INFO,
+          userId: request.userId,
+          metadata: {
+            requestId,
+            idempotentReturn: true,
+            originalResult: cachedResult.success ? 'success' : 'failed',
+          },
+        });
+      }
+      return cachedResult;
+    }
 
     try {
       // Log withdrawal request
@@ -318,7 +350,8 @@ export class ExchangeShieldedSDK {
           });
         }
 
-        return this.failWithdrawal(
+        // Cache rate limit failures for idempotency (prevents repeated rate limit checks on retry)
+        return this.failWithdrawalAndCache(
           requestId,
           request.userId,
           rateLimitResult.reason ?? 'Rate limit exceeded',
@@ -340,7 +373,8 @@ export class ExchangeShieldedSDK {
             { requestId, amount: amountResult.amount }
           );
 
-          return this.failWithdrawal(
+          // Cache velocity failures for idempotency
+          return this.failWithdrawalAndCache(
             requestId,
             request.userId,
             velocityResult.reason ?? 'Velocity check failed',
@@ -412,7 +446,7 @@ export class ExchangeShieldedSDK {
           });
         }
 
-        return {
+        const successResult: WithdrawalResult = {
           success: true,
           transactionId: result.result.txid,
           operationId,
@@ -420,9 +454,14 @@ export class ExchangeShieldedSDK {
           requestId,
           completedAt: new Date(),
         };
+
+        // Cache the result for idempotency
+        this.requestIdCache.set(requestId, successResult);
+
+        return successResult;
       } else {
         const errorMessage = result.error?.message ?? 'Transaction failed';
-        return this.failWithdrawal(requestId, request.userId, errorMessage, 'TX_FAILED');
+        return this.failWithdrawalAndCache(requestId, request.userId, errorMessage, 'TX_FAILED');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -430,7 +469,7 @@ export class ExchangeShieldedSDK {
       // Log with redacted error
       console.error('[SDK] Withdrawal failed:', redactSensitiveData({ error: errorMessage }));
 
-      return this.failWithdrawal(requestId, request.userId, errorMessage, 'INTERNAL_ERROR');
+      return this.failWithdrawalAndCache(requestId, request.userId, errorMessage, 'INTERNAL_ERROR');
     }
   }
 
@@ -572,7 +611,8 @@ export class ExchangeShieldedSDK {
   }
 
   /**
-   * Helper to create a failed withdrawal result
+   * Helper to create a failed withdrawal result (without caching)
+   * Used for validation failures before the withdrawal is actually attempted.
    */
   private failWithdrawal(
     requestId: string,
@@ -601,6 +641,24 @@ export class ExchangeShieldedSDK {
       requestId,
       completedAt: new Date(),
     };
+  }
+
+  /**
+   * Helper to create a failed withdrawal result AND cache it for idempotency
+   * Used for failures after the withdrawal was actually attempted.
+   */
+  private failWithdrawalAndCache(
+    requestId: string,
+    userId: string,
+    error: string,
+    errorCode: string
+  ): WithdrawalResult {
+    const result = this.failWithdrawal(requestId, userId, error, errorCode);
+
+    // Cache the result for idempotency
+    this.requestIdCache.set(requestId, result);
+
+    return result;
   }
 
   /**

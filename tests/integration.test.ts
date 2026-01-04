@@ -453,4 +453,90 @@ describe('Security Integration', () => {
       expect(rateLimitEvents.length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe('Request ID Idempotency', () => {
+    it('should return cached result for duplicate requestId', async () => {
+      const sdk = createExchangeSDK({
+        rpc: {
+          host: '127.0.0.1',
+          port: 8232,
+          auth: { username: 'user', password: 'pass' },
+        },
+        rateLimiter: {
+          maxAmountPerWithdrawal: 5, // Low limit to trigger a failure
+          maxWithdrawalsPerHour: 10,
+          maxWithdrawalsPerDay: 50,
+          maxTotalAmountPerDay: 500,
+          cooldownMs: 0,
+        },
+      });
+
+      const requestId = 'idempotent-request-123';
+      const request = {
+        userId: 'idempotency-test-user',
+        fromAddress:
+          'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress:
+          'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: 10, // Exceeds 5 ZEC limit
+        requestId,
+      };
+
+      // First call should fail due to rate limit
+      const result1 = await sdk.processWithdrawal(request);
+      expect(result1.success).toBe(false);
+      expect(result1.errorCode).toBe('RATE_LIMITED');
+      expect(result1.requestId).toBe(requestId);
+
+      // Second call with same requestId should return cached result immediately
+      // (not fail again due to rate limit)
+      const result2 = await sdk.processWithdrawal(request);
+      expect(result2.success).toBe(false);
+      expect(result2.errorCode).toBe('RATE_LIMITED');
+      expect(result2.requestId).toBe(requestId);
+
+      // Results should be identical
+      expect(result1.error).toBe(result2.error);
+    });
+
+    it('should NOT cache validation failures (allowing retry with corrected input)', async () => {
+      const sdk = createExchangeSDK({
+        rpc: {
+          host: '127.0.0.1',
+          port: 8232,
+          auth: { username: 'user', password: 'pass' },
+        },
+      });
+
+      const requestId = 'validation-test-456';
+
+      // First call with invalid address should fail
+      const result1 = await sdk.processWithdrawal({
+        userId: 'user-1',
+        fromAddress: 'invalid-address',
+        toAddress:
+          'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: 1,
+        requestId,
+      });
+      expect(result1.success).toBe(false);
+      expect(result1.errorCode).toBe('INVALID_FROM_ADDRESS');
+
+      // Second call with same requestId but valid address should NOT return cached result
+      // (validation failures are not cached to allow retry with corrected input)
+      const result2 = await sdk.processWithdrawal({
+        userId: 'user-1',
+        fromAddress:
+          'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress:
+          'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: 1,
+        requestId,
+      });
+
+      // This should be a new attempt, not the cached failure
+      // It will fail at RPC but with a different error (INTERNAL_ERROR)
+      expect(result2.errorCode).not.toBe('INVALID_FROM_ADDRESS');
+    });
+  });
 });
