@@ -4,6 +4,9 @@
  * Provides compliance-related functionality including viewing key export,
  * velocity checks, suspicious activity detection, and report generation.
  *
+ * IMPORTANT: All monetary amounts are in zatoshis (bigint).
+ * 1 ZEC = 100_000_000 zatoshis (10^8)
+ *
  * @packageDocumentation
  */
 
@@ -15,6 +18,7 @@ import {
   ComplianceReport,
   createAuditLogger,
 } from './audit-logger.js';
+import { zatoshisToZec } from '../utils/amounts.js';
 
 /**
  * Date range for reports
@@ -60,6 +64,8 @@ export interface ViewingKeyBundle {
 
 /**
  * Velocity check result
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 export interface VelocityCheckResult {
   /** Whether the velocity is within acceptable limits */
@@ -70,17 +76,19 @@ export interface VelocityCheckResult {
     lastHour: number;
     /** Transactions in the last 24 hours */
     last24Hours: number;
-    /** Total amount in the last hour */
-    amountLastHour: number;
-    /** Total amount in the last 24 hours */
-    amountLast24Hours: number;
+    /** Total amount in the last hour in zatoshis */
+    amountLastHour: bigint;
+    /** Total amount in the last 24 hours in zatoshis */
+    amountLast24Hours: bigint;
   };
   /** Velocity thresholds */
   thresholds: {
     maxTransactionsPerHour: number;
     maxTransactionsPerDay: number;
-    maxAmountPerHour: number;
-    maxAmountPerDay: number;
+    /** Maximum amount per hour in zatoshis */
+    maxAmountPerHour: bigint;
+    /** Maximum amount per day in zatoshis */
+    maxAmountPerDay: bigint;
   };
   /** Reason for failure (if applicable) */
   reason?: string;
@@ -114,16 +122,18 @@ export interface SuspiciousActivityFlag {
 
 /**
  * Velocity thresholds configuration
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 export interface VelocityThresholds {
   /** Maximum transactions per hour */
   maxTransactionsPerHour: number;
   /** Maximum transactions per day */
   maxTransactionsPerDay: number;
-  /** Maximum amount per hour (in ZEC) */
-  maxAmountPerHour: number;
-  /** Maximum amount per day (in ZEC) */
-  maxAmountPerDay: number;
+  /** Maximum amount per hour in zatoshis */
+  maxAmountPerHour: bigint;
+  /** Maximum amount per day in zatoshis */
+  maxAmountPerDay: bigint;
 }
 
 /**
@@ -143,18 +153,19 @@ export interface ComplianceConfig {
  */
 interface TransactionRecord {
   userId: string;
-  amount: number;
+  /** Amount in zatoshis */
+  amount: bigint;
   timestamp: number;
 }
 
 /**
- * Default velocity thresholds
+ * Default velocity thresholds (amounts in zatoshis)
  */
 const DEFAULT_VELOCITY_THRESHOLDS: VelocityThresholds = {
   maxTransactionsPerHour: 10,
   maxTransactionsPerDay: 50,
-  maxAmountPerHour: 100,
-  maxAmountPerDay: 1000,
+  maxAmountPerHour: 100_00000000n, // 100 ZEC
+  maxAmountPerDay: 1000_00000000n, // 1000 ZEC
 };
 
 /**
@@ -339,10 +350,10 @@ export class ComplianceManager {
    * Checks velocity for a user before processing a withdrawal
    *
    * @param userId - The user identifier
-   * @param amount - The withdrawal amount
+   * @param amountZatoshis - The withdrawal amount in zatoshis
    * @returns Velocity check result
    */
-  checkVelocity(userId: string, amount: number): VelocityCheckResult {
+  checkVelocity(userId: string, amountZatoshis: bigint): VelocityCheckResult {
     const now = Date.now();
     const hourAgo = now - MS_PER_HOUR;
     const dayAgo = now - MS_PER_DAY;
@@ -356,8 +367,8 @@ export class ComplianceManager {
     // Calculate velocity
     let lastHour = 0;
     let last24Hours = 0;
-    let amountLastHour = 0;
-    let amountLast24Hours = 0;
+    let amountLastHour = 0n;
+    let amountLast24Hours = 0n;
 
     for (const tx of userTransactions) {
       if (tx.timestamp >= dayAgo) {
@@ -373,8 +384,8 @@ export class ComplianceManager {
     // Include the current transaction in projections
     const projectedLastHour = lastHour + 1;
     const projectedLast24Hours = last24Hours + 1;
-    const projectedAmountLastHour = amountLastHour + amount;
-    const projectedAmountLast24Hours = amountLast24Hours + amount;
+    const projectedAmountLastHour = amountLastHour + amountZatoshis;
+    const projectedAmountLast24Hours = amountLast24Hours + amountZatoshis;
 
     // Calculate risk score
     const riskScore = this.calculateRiskScore(
@@ -413,35 +424,41 @@ export class ComplianceManager {
     }
 
     if (projectedAmountLastHour > this.thresholds.maxAmountPerHour) {
+      const projectedZec = zatoshisToZec(projectedAmountLastHour);
+      const maxZec = zatoshisToZec(this.thresholds.maxAmountPerHour);
       return {
         passed: false,
         velocity,
         thresholds: this.thresholds,
-        reason: `Hourly amount limit exceeded (${projectedAmountLastHour}/${this.thresholds.maxAmountPerHour} ZEC)`,
+        reason: `Hourly amount limit exceeded (${projectedZec}/${maxZec} ZEC)`,
         riskScore,
       };
     }
 
     if (projectedAmountLast24Hours > this.thresholds.maxAmountPerDay) {
+      const projectedZec = zatoshisToZec(projectedAmountLast24Hours);
+      const maxZec = zatoshisToZec(this.thresholds.maxAmountPerDay);
       return {
         passed: false,
         velocity,
         thresholds: this.thresholds,
-        reason: `Daily amount limit exceeded (${projectedAmountLast24Hours}/${this.thresholds.maxAmountPerDay} ZEC)`,
+        reason: `Daily amount limit exceeded (${projectedZec}/${maxZec} ZEC)`,
         riskScore,
       };
     }
 
-    // Log the check
+    // Log the check (convert to ZEC for display in audit log)
+    const amountZec = zatoshisToZec(amountZatoshis);
     this.auditLogger.log({
       eventType: AuditEventType.COMPLIANCE_CHECK,
       severity: riskScore > 50 ? AuditSeverity.WARNING : AuditSeverity.INFO,
       userId,
-      amount,
+      amount: amountZec,
       metadata: {
         checkType: 'velocity',
         passed: true,
         riskScore,
+        amountZatoshis: String(amountZatoshis),
       },
     });
 
@@ -457,12 +474,12 @@ export class ComplianceManager {
    * Records a transaction for velocity tracking
    *
    * @param userId - The user identifier
-   * @param amount - The transaction amount
+   * @param amountZatoshis - The transaction amount in zatoshis
    */
-  recordTransaction(userId: string, amount: number): void {
+  recordTransaction(userId: string, amountZatoshis: bigint): void {
     this.transactionHistory.push({
       userId,
-      amount,
+      amount: amountZatoshis,
       timestamp: Date.now(),
     });
   }
@@ -621,13 +638,14 @@ export class ComplianceManager {
   private calculateRiskScore(
     txHour: number,
     txDay: number,
-    amountHour: number,
-    amountDay: number
+    amountHourZatoshis: bigint,
+    amountDayZatoshis: bigint
   ): number {
     const hourlyTxRatio = txHour / this.thresholds.maxTransactionsPerHour;
     const dailyTxRatio = txDay / this.thresholds.maxTransactionsPerDay;
-    const hourlyAmountRatio = amountHour / this.thresholds.maxAmountPerHour;
-    const dailyAmountRatio = amountDay / this.thresholds.maxAmountPerDay;
+    // Convert to number for ratio calculation (safe since we're dividing)
+    const hourlyAmountRatio = Number(amountHourZatoshis) / Number(this.thresholds.maxAmountPerHour);
+    const dailyAmountRatio = Number(amountDayZatoshis) / Number(this.thresholds.maxAmountPerDay);
 
     // Weight the factors
     const weightedScore =

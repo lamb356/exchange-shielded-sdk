@@ -2,6 +2,7 @@
  * Rate Limiter Tests
  *
  * Tests for the WithdrawalRateLimiter class.
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 
 import {
@@ -10,6 +11,9 @@ import {
   createConservativeRateLimiter,
   createHighVolumeRateLimiter,
 } from '../src/security/rate-limiter.js';
+
+// Helper constants for zatoshis (1 ZEC = 100_000_000 zatoshis)
+const ZAT = 100_000_000n;
 
 describe('WithdrawalRateLimiter', () => {
   let limiter: WithdrawalRateLimiter;
@@ -30,15 +34,15 @@ describe('WithdrawalRateLimiter', () => {
     limiter = createTestLimiter({
       maxWithdrawalsPerHour: 5,
       maxWithdrawalsPerDay: 20,
-      maxAmountPerWithdrawal: 100,
-      maxTotalAmountPerDay: 500,
+      maxAmountPerWithdrawal: 100n * ZAT, // 100 ZEC
+      maxTotalAmountPerDay: 500n * ZAT, // 500 ZEC
       cooldownMs: 60000, // 1 minute
     });
   });
 
   describe('checkLimit', () => {
     it('should allow first withdrawal', () => {
-      const result = limiter.checkLimit('user-1', 10);
+      const result = limiter.checkLimit('user-1', 10n * ZAT);
 
       expect(result.allowed).toBe(true);
       expect(result.reason).toBeUndefined();
@@ -47,12 +51,12 @@ describe('WithdrawalRateLimiter', () => {
     it('should enforce hourly withdrawal limit', () => {
       // Make 5 withdrawals (at the limit)
       for (let i = 0; i < 5; i++) {
-        limiter.recordWithdrawal('user-1', 10);
+        limiter.recordWithdrawal('user-1', 10n * ZAT);
         advanceTime(61000); // Skip cooldown
       }
 
       // 6th should be denied
-      const result = limiter.checkLimit('user-1', 10);
+      const result = limiter.checkLimit('user-1', 10n * ZAT);
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('Hourly');
@@ -62,25 +66,25 @@ describe('WithdrawalRateLimiter', () => {
       const dayLimiter = createTestLimiter({
         maxWithdrawalsPerHour: 100, // High hourly limit
         maxWithdrawalsPerDay: 5,
-        maxAmountPerWithdrawal: 100,
-        maxTotalAmountPerDay: 10000,
+        maxAmountPerWithdrawal: 100n * ZAT,
+        maxTotalAmountPerDay: 10000n * ZAT,
         cooldownMs: 0, // No cooldown
       });
 
       // Make 5 withdrawals
       for (let i = 0; i < 5; i++) {
-        dayLimiter.recordWithdrawal('user-1', 10);
+        dayLimiter.recordWithdrawal('user-1', 10n * ZAT);
       }
 
       // 6th should be denied
-      const result = dayLimiter.checkLimit('user-1', 10);
+      const result = dayLimiter.checkLimit('user-1', 10n * ZAT);
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('Daily');
     });
 
     it('should enforce max amount per withdrawal', () => {
-      const result = limiter.checkLimit('user-1', 150); // Over 100 limit
+      const result = limiter.checkLimit('user-1', 150n * ZAT); // Over 100 ZEC limit
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('exceeds maximum');
@@ -88,21 +92,21 @@ describe('WithdrawalRateLimiter', () => {
 
     it('should enforce daily total amount limit', () => {
       // Use up most of the daily limit
-      limiter.recordWithdrawal('user-1', 450);
+      limiter.recordWithdrawal('user-1', 450n * ZAT);
       advanceTime(61000); // Skip cooldown
 
       // Try to withdraw more than remaining
-      const result = limiter.checkLimit('user-1', 100); // Only 50 remaining
+      const result = limiter.checkLimit('user-1', 100n * ZAT); // Only 50 ZEC remaining
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('Daily amount limit');
     });
 
     it('should enforce cooldown period', () => {
-      limiter.recordWithdrawal('user-1', 10);
+      limiter.recordWithdrawal('user-1', 10n * ZAT);
 
       // Try immediately
-      const result = limiter.checkLimit('user-1', 10);
+      const result = limiter.checkLimit('user-1', 10n * ZAT);
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('Cooldown');
@@ -111,52 +115,52 @@ describe('WithdrawalRateLimiter', () => {
     });
 
     it('should allow after cooldown expires', () => {
-      limiter.recordWithdrawal('user-1', 10);
+      limiter.recordWithdrawal('user-1', 10n * ZAT);
 
       // Advance past cooldown
       advanceTime(61000);
 
-      const result = limiter.checkLimit('user-1', 10);
+      const result = limiter.checkLimit('user-1', 10n * ZAT);
 
       expect(result.allowed).toBe(true);
     });
 
     it('should track separate limits per user', () => {
       // User 1 makes withdrawals
-      limiter.recordWithdrawal('user-1', 10);
+      limiter.recordWithdrawal('user-1', 10n * ZAT);
 
       // User 2 should not be affected
-      const result = limiter.checkLimit('user-2', 10);
+      const result = limiter.checkLimit('user-2', 10n * ZAT);
 
       expect(result.allowed).toBe(true);
     });
 
     it('should include usage statistics in result', () => {
-      limiter.recordWithdrawal('user-1', 50);
+      limiter.recordWithdrawal('user-1', 50n * ZAT);
       advanceTime(61000);
 
-      const result = limiter.checkLimit('user-1', 10);
+      const result = limiter.checkLimit('user-1', 10n * ZAT);
 
       expect(result.usage).toBeDefined();
       expect(result.usage.withdrawalsThisDay).toBe(1);
-      expect(result.usage.totalAmountToday).toBe(50);
+      expect(result.usage.totalAmountToday).toBe(50n * ZAT);
     });
   });
 
   describe('recordWithdrawal', () => {
     it('should record withdrawal for tracking', () => {
-      limiter.recordWithdrawal('user-1', 25);
+      limiter.recordWithdrawal('user-1', 25n * ZAT);
 
       const remaining = limiter.getRemainingLimit('user-1');
 
-      expect(remaining.amountRemainingToday).toBe(475);
+      expect(remaining.amountRemainingToday).toBe(475n * ZAT);
     });
 
     it('should update last withdrawal time', () => {
       const before = limiter.getRemainingLimit('user-1');
       expect(before.cooldownRemainingMs).toBe(0);
 
-      limiter.recordWithdrawal('user-1', 10);
+      limiter.recordWithdrawal('user-1', 10n * ZAT);
 
       const after = limiter.getRemainingLimit('user-1');
       expect(after.cooldownRemainingMs).toBeGreaterThan(0);
@@ -169,21 +173,21 @@ describe('WithdrawalRateLimiter', () => {
 
       expect(remaining.withdrawalsRemainingHour).toBe(5);
       expect(remaining.withdrawalsRemainingDay).toBe(20);
-      expect(remaining.maxSingleWithdrawal).toBe(100);
-      expect(remaining.amountRemainingToday).toBe(500);
+      expect(remaining.maxSingleWithdrawal).toBe(100n * ZAT);
+      expect(remaining.amountRemainingToday).toBe(500n * ZAT);
       expect(remaining.cooldownRemainingMs).toBe(0);
     });
 
     it('should reflect consumed limits', () => {
-      limiter.recordWithdrawal('user-1', 100);
+      limiter.recordWithdrawal('user-1', 100n * ZAT);
       advanceTime(61000);
-      limiter.recordWithdrawal('user-1', 100);
+      limiter.recordWithdrawal('user-1', 100n * ZAT);
 
       const remaining = limiter.getRemainingLimit('user-1');
 
       expect(remaining.withdrawalsRemainingHour).toBe(3);
       expect(remaining.withdrawalsRemainingDay).toBe(18);
-      expect(remaining.amountRemainingToday).toBe(300);
+      expect(remaining.amountRemainingToday).toBe(300n * ZAT);
     });
 
     it('should include reset timestamps', () => {
@@ -196,30 +200,30 @@ describe('WithdrawalRateLimiter', () => {
 
   describe('resetUser', () => {
     it('should reset a user\'s limits', () => {
-      limiter.recordWithdrawal('user-1', 100);
+      limiter.recordWithdrawal('user-1', 100n * ZAT);
       advanceTime(61000);
-      limiter.recordWithdrawal('user-1', 100);
+      limiter.recordWithdrawal('user-1', 100n * ZAT);
 
       limiter.resetUser('user-1');
 
       const remaining = limiter.getRemainingLimit('user-1');
-      expect(remaining.amountRemainingToday).toBe(500);
+      expect(remaining.amountRemainingToday).toBe(500n * ZAT);
       expect(remaining.withdrawalsRemainingDay).toBe(20);
     });
   });
 
   describe('resetAll', () => {
     it('should reset all users', () => {
-      limiter.recordWithdrawal('user-1', 100);
-      limiter.recordWithdrawal('user-2', 100);
+      limiter.recordWithdrawal('user-1', 100n * ZAT);
+      limiter.recordWithdrawal('user-2', 100n * ZAT);
 
       limiter.resetAll();
 
       const remaining1 = limiter.getRemainingLimit('user-1');
       const remaining2 = limiter.getRemainingLimit('user-2');
 
-      expect(remaining1.amountRemainingToday).toBe(500);
-      expect(remaining2.amountRemainingToday).toBe(500);
+      expect(remaining1.amountRemainingToday).toBe(500n * ZAT);
+      expect(remaining2.amountRemainingToday).toBe(500n * ZAT);
     });
   });
 
@@ -229,8 +233,8 @@ describe('WithdrawalRateLimiter', () => {
 
       expect(config.maxWithdrawalsPerHour).toBe(5);
       expect(config.maxWithdrawalsPerDay).toBe(20);
-      expect(config.maxAmountPerWithdrawal).toBe(100);
-      expect(config.maxTotalAmountPerDay).toBe(500);
+      expect(config.maxAmountPerWithdrawal).toBe(100n * ZAT);
+      expect(config.maxTotalAmountPerDay).toBe(500n * ZAT);
       expect(config.cooldownMs).toBe(60000);
     });
 
@@ -247,36 +251,36 @@ describe('WithdrawalRateLimiter', () => {
       const slidingLimiter = createTestLimiter({
         maxWithdrawalsPerHour: 3,
         maxWithdrawalsPerDay: 100,
-        maxAmountPerWithdrawal: 100,
-        maxTotalAmountPerDay: 10000,
+        maxAmountPerWithdrawal: 100n * ZAT,
+        maxTotalAmountPerDay: 10000n * ZAT,
         cooldownMs: 0,
         useSlidingWindow: true,
       });
 
       // Make 3 withdrawals at start
-      slidingLimiter.recordWithdrawal('user-1', 10);
-      slidingLimiter.recordWithdrawal('user-1', 10);
-      slidingLimiter.recordWithdrawal('user-1', 10);
+      slidingLimiter.recordWithdrawal('user-1', 10n * ZAT);
+      slidingLimiter.recordWithdrawal('user-1', 10n * ZAT);
+      slidingLimiter.recordWithdrawal('user-1', 10n * ZAT);
 
       // Should be blocked
-      let result = slidingLimiter.checkLimit('user-1', 10);
+      let result = slidingLimiter.checkLimit('user-1', 10n * ZAT);
       expect(result.allowed).toBe(false);
 
       // Advance 30 minutes - still blocked
       advanceTime(30 * 60 * 1000);
-      result = slidingLimiter.checkLimit('user-1', 10);
+      result = slidingLimiter.checkLimit('user-1', 10n * ZAT);
       expect(result.allowed).toBe(false);
 
       // Advance to 61 minutes - should be allowed (sliding window)
       advanceTime(31 * 60 * 1000);
-      result = slidingLimiter.checkLimit('user-1', 10);
+      result = slidingLimiter.checkLimit('user-1', 10n * ZAT);
       expect(result.allowed).toBe(true);
     });
   });
 
   describe('day boundary cleanup', () => {
     it('should clean up records older than 24 hours', () => {
-      limiter.recordWithdrawal('user-1', 100);
+      limiter.recordWithdrawal('user-1', 100n * ZAT);
 
       // Advance 25 hours
       advanceTime(25 * 60 * 60 * 1000);
@@ -284,7 +288,7 @@ describe('WithdrawalRateLimiter', () => {
       const remaining = limiter.getRemainingLimit('user-1');
 
       // Old withdrawal should be cleaned up
-      expect(remaining.amountRemainingToday).toBe(500);
+      expect(remaining.amountRemainingToday).toBe(500n * ZAT);
       expect(remaining.withdrawalsRemainingDay).toBe(20);
     });
   });
@@ -304,13 +308,13 @@ describe('WithdrawalRateLimiter', () => {
 
     it('should reject invalid maxAmountPerWithdrawal', () => {
       expect(() => {
-        new WithdrawalRateLimiter({ maxAmountPerWithdrawal: 0 });
+        new WithdrawalRateLimiter({ maxAmountPerWithdrawal: 0n });
       }).toThrow();
     });
 
     it('should reject invalid maxTotalAmountPerDay', () => {
       expect(() => {
-        new WithdrawalRateLimiter({ maxTotalAmountPerDay: -100 });
+        new WithdrawalRateLimiter({ maxTotalAmountPerDay: -100n });
       }).toThrow();
     });
 

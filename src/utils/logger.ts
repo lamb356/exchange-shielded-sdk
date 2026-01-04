@@ -8,6 +8,17 @@
  */
 
 /**
+ * JSON replacer function to handle BigInt serialization
+ * BigInt values are converted to strings to avoid serialization errors
+ */
+function bigIntReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  return value;
+}
+
+/**
  * Log severity levels
  */
 export enum LogLevel {
@@ -157,7 +168,8 @@ export class Logger {
         };
       }
 
-      const output = JSON.stringify(entry);
+      // Use replacer to handle BigInt serialization
+      const output = JSON.stringify(entry, bigIntReplacer);
 
       if (level === LogLevel.ERROR) {
         console.error(output);
@@ -179,7 +191,7 @@ export class Logger {
       parts.push(message);
 
       if (context && Object.keys(context).length > 0) {
-        parts.push(JSON.stringify(context));
+        parts.push(JSON.stringify(context, bigIntReplacer));
       }
 
       const output = parts.join(' ');

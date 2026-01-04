@@ -5,6 +5,13 @@
  * Provides a unified API that combines transaction building, RPC communication,
  * security, and compliance features.
  *
+ * IMPORTANT: All monetary amounts in this SDK are expressed in zatoshis (bigint).
+ * 1 ZEC = 100_000_000 zatoshis (10^8)
+ *
+ * This zatoshis-first approach prevents floating-point rounding errors that
+ * could lead to incorrect transaction amounts. Use the utility functions
+ * zecToZatoshis() and zatoshisToZec() for conversions when needed.
+ *
  * @packageDocumentation
  */
 
@@ -18,7 +25,6 @@ import {
 } from '../security/rate-limiter.js';
 import {
   sanitizeAddress,
-  sanitizeAmount,
   sanitizeMemo,
   redactSensitiveData,
 } from '../security/sanitizer.js';
@@ -35,6 +41,8 @@ import {
   VelocityCheckResult,
 } from '../compliance/compliance.js';
 import { isShielded } from '../address-validator.js';
+import { zatoshisToZec, validatePositiveZatoshis, ZATOSHIS_PER_ZEC } from '../utils/amounts.js';
+import { Logger, LogLevel } from '../utils/logger.js';
 
 /**
  * SDK configuration
@@ -62,6 +70,8 @@ export interface SDKConfig {
 
 /**
  * Withdrawal request
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 export interface WithdrawalRequest {
   /** User ID making the request */
@@ -70,8 +80,8 @@ export interface WithdrawalRequest {
   fromAddress: string;
   /** Destination address */
   toAddress: string;
-  /** Amount in ZEC */
-  amount: number;
+  /** Amount in zatoshis (1 ZEC = 100_000_000n zatoshis) */
+  amount: bigint;
   /** Optional memo (for shielded recipients) */
   memo?: string;
   /** Optional request ID for tracking */
@@ -80,6 +90,8 @@ export interface WithdrawalRequest {
 
 /**
  * Withdrawal result
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 export interface WithdrawalResult {
   /** Whether the withdrawal was successful */
@@ -92,8 +104,8 @@ export interface WithdrawalResult {
   error?: string;
   /** Error code if failed */
   errorCode?: string;
-  /** Fee paid (in ZEC) */
-  fee?: number;
+  /** Fee paid in zatoshis (1 ZEC = 100_000_000n zatoshis) */
+  fee?: bigint;
   /** Request ID from the original request */
   requestId?: string;
   /** Timestamp of completion */
@@ -118,12 +130,12 @@ export interface WithdrawalStatus {
 
 /**
  * Fee estimate
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 export interface FeeEstimate {
-  /** Estimated fee in ZEC */
-  feeZec: number;
-  /** Estimated fee in zatoshis */
-  feeZatoshis: number;
+  /** Estimated fee in zatoshis (1 ZEC = 100_000_000n zatoshis) */
+  feeZatoshis: bigint;
   /** Number of logical actions */
   logicalActions: number;
   /** Whether the estimate is approximate */
@@ -137,6 +149,9 @@ export interface FeeEstimate {
  * Integrates transaction building, RPC communication, security controls,
  * and compliance features.
  *
+ * IMPORTANT: All monetary amounts are in zatoshis (bigint).
+ * 1 ZEC = 100_000_000 zatoshis (10^8)
+ *
  * @example
  * ```typescript
  * const sdk = new ExchangeShieldedSDK({
@@ -149,12 +164,12 @@ export interface FeeEstimate {
  *   enableAuditLogging: true
  * });
  *
- * // Process a withdrawal
+ * // Process a withdrawal (amount in zatoshis: 10.5 ZEC = 1_050_000_000n)
  * const result = await sdk.processWithdrawal({
  *   userId: 'user-123',
  *   fromAddress: 'zs1source...',
  *   toAddress: 'zs1dest...',
- *   amount: 10.5
+ *   amount: 1_050_000_000n // 10.5 ZEC in zatoshis
  * });
  *
  * if (result.success) {
@@ -184,6 +199,9 @@ export class ExchangeShieldedSDK {
   /** Configuration */
   private readonly config: SDKConfig;
 
+  /** Structured logger */
+  private readonly logger: Logger;
+
   /** Pending operations tracking */
   private readonly pendingOperations: Map<string, { userId: string; requestId?: string }>;
 
@@ -203,6 +221,9 @@ export class ExchangeShieldedSDK {
    */
   constructor(config: SDKConfig) {
     this.config = config;
+
+    // Initialize structured logger
+    this.logger = new Logger({ level: LogLevel.INFO, prefix: 'SDK' });
 
     // Initialize RPC client
     this.rpcClient = new ZcashRpcClient(config.rpc);
@@ -273,22 +294,7 @@ export class ExchangeShieldedSDK {
     }
 
     try {
-      // Log withdrawal request
-      if (this.config.enableAuditLogging !== false) {
-        this.auditLogger.log({
-          eventType: AuditEventType.WITHDRAWAL_REQUESTED,
-          severity: AuditSeverity.INFO,
-          userId: request.userId,
-          amount: request.amount,
-          destinationAddress: request.toAddress,
-          metadata: {
-            requestId,
-            fromAddress: request.fromAddress,
-          },
-        });
-      }
-
-      // Validate and sanitize inputs
+      // Validate and sanitize inputs first
       const fromResult = sanitizeAddress(request.fromAddress);
       if (!fromResult.valid) {
         return this.failWithdrawal(
@@ -320,14 +326,35 @@ export class ExchangeShieldedSDK {
         );
       }
 
-      const amountResult = sanitizeAmount(request.amount);
-      if (!amountResult.valid) {
+      // Validate the amount (bigint zatoshis)
+      try {
+        validatePositiveZatoshis(request.amount);
+      } catch (amountError) {
         return this.failWithdrawal(
           requestId,
           request.userId,
-          amountResult.error ?? 'Invalid amount',
+          amountError instanceof Error ? amountError.message : 'Invalid amount',
           'INVALID_AMOUNT'
         );
+      }
+
+      // Convert zatoshis to ZEC for internal processing and logging
+      const amountZec = zatoshisToZec(request.amount);
+
+      // Log withdrawal request (after validation, using converted ZEC for display)
+      if (this.config.enableAuditLogging !== false) {
+        this.auditLogger.log({
+          eventType: AuditEventType.WITHDRAWAL_REQUESTED,
+          severity: AuditSeverity.INFO,
+          userId: request.userId,
+          amount: amountZec,
+          destinationAddress: request.toAddress,
+          metadata: {
+            requestId,
+            fromAddress: request.fromAddress,
+            amountZatoshis: String(request.amount),
+          },
+        });
       }
 
       // Sanitize memo if provided
@@ -345,15 +372,15 @@ export class ExchangeShieldedSDK {
         memo = memoResult.memo;
       }
 
-      // Check rate limits
-      const rateLimitResult = this.rateLimiter.checkLimit(request.userId, amountResult.amount);
+      // Check rate limits (using bigint amount)
+      const rateLimitResult = this.rateLimiter.checkLimit(request.userId, request.amount);
       if (!rateLimitResult.allowed) {
         if (this.config.enableAuditLogging !== false) {
           this.auditLogger.log({
             eventType: AuditEventType.RATE_LIMIT_HIT,
             severity: AuditSeverity.WARNING,
             userId: request.userId,
-            amount: amountResult.amount,
+            amount: amountZec, // Audit logger still uses ZEC for display
             metadata: {
               requestId,
               reason: rateLimitResult.reason,
@@ -375,14 +402,14 @@ export class ExchangeShieldedSDK {
       if (this.config.enableCompliance !== false) {
         const velocityResult = this.complianceManager.checkVelocity(
           request.userId,
-          amountResult.amount
+          request.amount
         );
 
         if (!velocityResult.passed) {
           this.complianceManager.flagSuspiciousActivity(
             request.userId,
             velocityResult.reason ?? 'Velocity check failed',
-            { requestId, amount: amountResult.amount }
+            { requestId, amountZatoshis: String(request.amount) }
           );
 
           // Cache velocity failures for idempotency
@@ -401,17 +428,17 @@ export class ExchangeShieldedSDK {
           eventType: AuditEventType.WITHDRAWAL_APPROVED,
           severity: AuditSeverity.INFO,
           userId: request.userId,
-          amount: amountResult.amount,
+          amount: amountZec, // Audit logger uses ZEC for display
           destinationAddress: toResult.address,
           metadata: { requestId },
         });
       }
 
-      // Build the transaction
+      // Build the transaction (transaction builder uses ZEC internally)
       const pendingTx = this.txBuilder.buildShieldedWithdrawal(
         fromResult.address,
         toResult.address,
-        amountResult.amount,
+        amountZec,
         memo
       );
 
@@ -430,11 +457,11 @@ export class ExchangeShieldedSDK {
       // Wait for completion
       const result = await this.rpcClient.waitForOperation(operationId);
 
-      // Record the withdrawal
-      this.rateLimiter.recordWithdrawal(request.userId, amountResult.amount);
+      // Record the withdrawal (using bigint amount)
+      this.rateLimiter.recordWithdrawal(request.userId, request.amount);
 
       if (this.config.enableCompliance !== false) {
-        this.complianceManager.recordTransaction(request.userId, amountResult.amount);
+        this.complianceManager.recordTransaction(request.userId, request.amount);
       }
 
       // Clean up tracking
@@ -448,7 +475,7 @@ export class ExchangeShieldedSDK {
             severity: AuditSeverity.INFO,
             userId: request.userId,
             transactionId: result.result.txid,
-            amount: amountResult.amount,
+            amount: amountZec, // Audit logger uses ZEC for display
             destinationAddress: toResult.address,
             metadata: {
               requestId,
@@ -458,11 +485,16 @@ export class ExchangeShieldedSDK {
           });
         }
 
+        // Convert fee from ZEC to zatoshis for the result
+        const feeZatoshis = zsendmanyRequest.fee !== undefined && zsendmanyRequest.fee !== null
+          ? BigInt(Math.round(zsendmanyRequest.fee * 100_000_000))
+          : undefined;
+
         const successResult: WithdrawalResult = {
           success: true,
           transactionId: result.result.txid,
           operationId,
-          fee: zsendmanyRequest.fee ?? undefined,
+          fee: feeZatoshis,
           requestId,
           completedAt: new Date(),
         };
@@ -478,8 +510,8 @@ export class ExchangeShieldedSDK {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-      // Log with redacted error
-      console.error('[SDK] Withdrawal failed:', redactSensitiveData({ error: errorMessage }));
+      // Log with redacted error using structured logger
+      this.logger.error('Withdrawal failed', redactSensitiveData({ error: errorMessage }) as Record<string, unknown>);
 
       return this.failWithdrawalAndCache(requestId, request.userId, errorMessage, 'INTERNAL_ERROR');
     }
@@ -514,16 +546,22 @@ export class ExchangeShieldedSDK {
   /**
    * Estimates the fee for a withdrawal
    *
-   * @param amount - The withdrawal amount
+   * @param amountZatoshis - The withdrawal amount in zatoshis
    * @param destination - The destination address
-   * @returns Fee estimate
+   * @returns Fee estimate (fee in zatoshis)
    */
-  async estimateWithdrawalFee(amount: number, destination: string): Promise<FeeEstimate> {
+  async estimateWithdrawalFee(amountZatoshis: bigint, destination: string): Promise<FeeEstimate> {
     // Validate destination
     const destResult = sanitizeAddress(destination);
     if (!destResult.valid) {
       throw new Error(`Invalid destination address: ${destResult.error}`);
     }
+
+    // Validate amount
+    validatePositiveZatoshis(amountZatoshis);
+
+    // Convert to ZEC for internal processing
+    const amountZec = zatoshisToZec(amountZatoshis);
 
     // Build a dummy transaction for estimation
     // Using a placeholder source address
@@ -533,26 +571,24 @@ export class ExchangeShieldedSDK {
       const pendingTx: PendingTransaction = {
         from: placeholderSource,
         to: destResult.address,
-        amount,
+        amount: amountZec,
         createdAt: Date.now(),
         fromType: 'sapling',
         toType: destResult.type,
       };
 
       const feeZec = await this.txBuilder.estimateFee(pendingTx);
-      const feeZatoshis = Math.round(feeZec * 100_000_000);
+      const feeZatoshis = BigInt(Math.round(feeZec * 100_000_000));
 
       return {
-        feeZec,
         feeZatoshis,
-        logicalActions: Math.ceil(feeZatoshis / 5000), // Approximate from fee
+        logicalActions: Math.ceil(Number(feeZatoshis) / 5000), // Approximate from fee
         isApproximate: true,
       };
     } catch {
       // Return minimum fee as fallback
       return {
-        feeZec: 0.0001,
-        feeZatoshis: 10000,
+        feeZatoshis: 10000n,
         logicalActions: 2,
         isApproximate: true,
       };
@@ -582,22 +618,22 @@ export class ExchangeShieldedSDK {
    * Checks rate limit status for a user
    *
    * @param userId - The user ID
-   * @param amount - The amount to check
+   * @param amountZatoshis - The amount in zatoshis to check
    * @returns Rate limit check result
    */
-  checkRateLimit(userId: string, amount: number): RateLimitResult {
-    return this.rateLimiter.checkLimit(userId, amount);
+  checkRateLimit(userId: string, amountZatoshis: bigint): RateLimitResult {
+    return this.rateLimiter.checkLimit(userId, amountZatoshis);
   }
 
   /**
    * Checks velocity for a user
    *
    * @param userId - The user ID
-   * @param amount - The amount to check
+   * @param amountZatoshis - The amount in zatoshis to check
    * @returns Velocity check result
    */
-  checkVelocity(userId: string, amount: number): VelocityCheckResult {
-    return this.complianceManager.checkVelocity(userId, amount);
+  checkVelocity(userId: string, amountZatoshis: bigint): VelocityCheckResult {
+    return this.complianceManager.checkVelocity(userId, amountZatoshis);
   }
 
   /**

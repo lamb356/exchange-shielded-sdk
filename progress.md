@@ -1,5 +1,40 @@
 # Exchange Shielded Withdrawal SDK - Progress
 
+## Milestone 4: Exchange-Grade Upgrade
+
+### Status: IN PROGRESS
+
+### Checklist
+
+- [x] P1 - API Fixes
+  - [x] P1.1 - Zatoshis-first API (all amounts as bigint)
+  - [x] P1.2 - Remove console.log/console.error, use Logger
+- [ ] P2 - Storage Interfaces (pluggable adapters)
+- [ ] P3 - Withdrawal Status Lifecycle
+- [ ] P4 - Documentation (production deployment guide)
+- [ ] P5 - Additional Tests
+
+### P1 Summary - Zatoshis-First API
+
+Changed all monetary amounts from `number` to `bigint` (zatoshis):
+- `WithdrawalRequest.amount`: bigint (was number)
+- `WithdrawalResult.fee`: bigint (was number)
+- `FeeEstimate.feeZatoshis`: bigint, removed `feeZec`
+- `RateLimitConfig` amounts: all bigint
+- `RateLimitUsage.totalAmountToday`: bigint
+- `RemainingLimit` amounts: all bigint
+- `VelocityThresholds` amounts: all bigint
+- `VelocityCheckResult.velocity` amounts: all bigint
+
+Replaced all `console.log/error` with structured Logger in:
+- `src/sdk/exchange-sdk.ts`
+- `src/compliance/audit-logger.ts`
+- `src/security/key-manager.ts`
+
+Added BigInt JSON serialization support in Logger and AuditLogger.
+
+---
+
 ## Milestone 3: Security & Integration
 
 ### Status: COMPLETED

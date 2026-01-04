@@ -15,6 +15,7 @@
 
 import { createHash, createCipheriv, createDecipheriv, randomBytes, scrypt } from 'crypto';
 import { promisify } from 'util';
+import { Logger, LogLevel } from '../utils/logger.js';
 
 const scryptAsync = promisify(scrypt);
 
@@ -173,6 +174,9 @@ export class SecureKeyManager {
   /** Auto-clear timers */
   private readonly autoClearTimers: Map<string, NodeJS.Timeout>;
 
+  /** Structured logger for key events (never logs key data) */
+  private readonly logger: Logger;
+
   /**
    * Creates a new SecureKeyManager
    *
@@ -181,6 +185,7 @@ export class SecureKeyManager {
   constructor(config: KeyManagerConfig = {}) {
     this.keys = new Map();
     this.autoClearTimers = new Map();
+    this.logger = new Logger({ level: LogLevel.INFO, prefix: 'KeyManager' });
 
     this.config = {
       maxKeys: config.maxKeys ?? 100,
@@ -558,8 +563,7 @@ export class SecureKeyManager {
    */
   private logKeyEvent(event: string, keyId: string): void {
     // Safe logging - never include key data
-    const timestamp = new Date().toISOString();
-    console.log(`[KeyManager] ${timestamp} - ${event}: keyId=${keyId}`);
+    this.logger.info(event, { keyId });
   }
 
   /**

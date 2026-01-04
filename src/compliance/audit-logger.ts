@@ -14,6 +14,7 @@
 
 import { createHash } from 'crypto';
 import { redactSensitiveData } from '../security/sanitizer.js';
+import { Logger, LogLevel } from '../utils/logger.js';
 
 /**
  * Shielded address prefixes that should be redacted in audit logs
@@ -291,6 +292,9 @@ export class AuditLogger {
   /** Hash of the last event */
   private lastHash: string;
 
+  /** Structured logger for internal messages */
+  private readonly logger: Logger;
+
   /**
    * Creates a new AuditLogger
    *
@@ -300,6 +304,7 @@ export class AuditLogger {
     this.events = [];
     this.eventCounter = 0;
     this.lastHash = GENESIS_HASH;
+    this.logger = new Logger({ level: LogLevel.ERROR, prefix: 'AuditLogger' });
 
     this.config = {
       ...DEFAULT_CONFIG,
@@ -369,7 +374,7 @@ export class AuditLogger {
       const lastEvent = this.events[this.events.length - 1];
       if (lastEvent && lastEvent.hash !== storedEvent.previousHash) {
         // Chain integrity compromised - log critical event
-        console.error('[AuditLogger] CRITICAL: Chain integrity compromised!');
+        this.logger.error('CRITICAL: Chain integrity compromised!');
       }
     }
 
@@ -386,7 +391,7 @@ export class AuditLogger {
       try {
         this.config.onEvent(storedEvent);
       } catch (error) {
-        console.error('[AuditLogger] Error in event handler:', error);
+        this.logger.error('Error in event handler', {}, error instanceof Error ? error : undefined);
       }
     }
 
@@ -597,6 +602,10 @@ export class AuditLogger {
    * Computes the hash of an event
    */
   private computeEventHash(event: StoredAuditEvent): string {
+    // BigInt replacer for JSON serialization
+    const replacer = (_key: string, value: unknown) =>
+      typeof value === 'bigint' ? value.toString() : value;
+
     const data = JSON.stringify({
       id: event.id,
       timestamp: event.timestamp.toISOString(),
@@ -608,7 +617,7 @@ export class AuditLogger {
       destinationAddress: event.destinationAddress,
       metadata: event.metadata,
       previousHash: event.previousHash,
-    });
+    }, replacer);
 
     return createHash('sha256').update(data).digest('hex');
   }

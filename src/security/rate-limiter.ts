@@ -4,21 +4,28 @@
  * Provides rate limiting for withdrawal operations to prevent abuse
  * and ensure compliance with exchange policies.
  *
+ * IMPORTANT: All monetary amounts are in zatoshis (bigint).
+ * 1 ZEC = 100_000_000 zatoshis (10^8)
+ *
  * @packageDocumentation
  */
 
+import { zatoshisToZec, zecToZatoshis } from '../utils/amounts.js';
+
 /**
  * Rate limit configuration
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 export interface RateLimitConfig {
   /** Maximum withdrawals per hour per user */
   maxWithdrawalsPerHour: number;
   /** Maximum withdrawals per day per user */
   maxWithdrawalsPerDay: number;
-  /** Maximum amount per single withdrawal (in ZEC) */
-  maxAmountPerWithdrawal: number;
-  /** Maximum total amount per day per user (in ZEC) */
-  maxTotalAmountPerDay: number;
+  /** Maximum amount per single withdrawal in zatoshis (1 ZEC = 100_000_000n) */
+  maxAmountPerWithdrawal: bigint;
+  /** Maximum total amount per day per user in zatoshis (1 ZEC = 100_000_000n) */
+  maxTotalAmountPerDay: bigint;
   /** Minimum cooldown between withdrawals in milliseconds */
   cooldownMs: number;
   /** Whether to enable sliding window rate limiting */
@@ -41,30 +48,34 @@ export interface RateLimitResult {
 
 /**
  * Current usage statistics for a user
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 export interface RateLimitUsage {
   /** Withdrawals in the current hour */
   withdrawalsThisHour: number;
   /** Withdrawals in the current day */
   withdrawalsThisDay: number;
-  /** Total amount withdrawn today (in ZEC) */
-  totalAmountToday: number;
+  /** Total amount withdrawn today in zatoshis */
+  totalAmountToday: bigint;
   /** Timestamp of last withdrawal */
   lastWithdrawalAt?: number;
 }
 
 /**
  * Remaining limits for a user
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 export interface RemainingLimit {
   /** Remaining withdrawals this hour */
   withdrawalsRemainingHour: number;
   /** Remaining withdrawals this day */
   withdrawalsRemainingDay: number;
-  /** Remaining amount for single withdrawal (in ZEC) */
-  maxSingleWithdrawal: number;
-  /** Remaining total amount for today (in ZEC) */
-  amountRemainingToday: number;
+  /** Maximum amount for single withdrawal in zatoshis */
+  maxSingleWithdrawal: bigint;
+  /** Remaining total amount for today in zatoshis */
+  amountRemainingToday: bigint;
   /** Milliseconds until cooldown expires (0 if not in cooldown) */
   cooldownRemainingMs: number;
   /** Timestamp when hour limit resets */
@@ -77,8 +88,8 @@ export interface RemainingLimit {
  * Internal withdrawal record
  */
 interface WithdrawalRecord {
-  /** Withdrawal amount in ZEC */
-  amount: number;
+  /** Withdrawal amount in zatoshis */
+  amount: bigint;
   /** Timestamp of withdrawal */
   timestamp: number;
 }
@@ -94,13 +105,13 @@ interface UserRateLimitState {
 }
 
 /**
- * Default rate limit configuration
+ * Default rate limit configuration (amounts in zatoshis)
  */
 const DEFAULT_CONFIG: RateLimitConfig = {
   maxWithdrawalsPerHour: 10,
   maxWithdrawalsPerDay: 50,
-  maxAmountPerWithdrawal: 100, // 100 ZEC
-  maxTotalAmountPerDay: 1000, // 1000 ZEC
+  maxAmountPerWithdrawal: 100_00000000n, // 100 ZEC in zatoshis
+  maxTotalAmountPerDay: 1000_00000000n, // 1000 ZEC in zatoshis
   cooldownMs: 60000, // 1 minute
   useSlidingWindow: true,
 };
@@ -176,10 +187,10 @@ export class WithdrawalRateLimiter {
     if (this.config.maxWithdrawalsPerDay <= 0) {
       throw new Error('maxWithdrawalsPerDay must be positive');
     }
-    if (this.config.maxAmountPerWithdrawal <= 0) {
+    if (this.config.maxAmountPerWithdrawal <= 0n) {
       throw new Error('maxAmountPerWithdrawal must be positive');
     }
-    if (this.config.maxTotalAmountPerDay <= 0) {
+    if (this.config.maxTotalAmountPerDay <= 0n) {
       throw new Error('maxTotalAmountPerDay must be positive');
     }
     if (this.config.cooldownMs < 0) {
@@ -191,10 +202,10 @@ export class WithdrawalRateLimiter {
    * Checks if a withdrawal is allowed for a user
    *
    * @param userId - The user identifier
-   * @param amount - The withdrawal amount in ZEC
+   * @param amountZatoshis - The withdrawal amount in zatoshis
    * @returns Rate limit check result
    */
-  checkLimit(userId: string, amount: number): RateLimitResult {
+  checkLimit(userId: string, amountZatoshis: bigint): RateLimitResult {
     const now = this.getNow();
     const state = this.getOrCreateUserState(userId);
 
@@ -237,21 +248,24 @@ export class WithdrawalRateLimiter {
     }
 
     // Check single withdrawal amount
-    if (amount > this.config.maxAmountPerWithdrawal) {
+    if (amountZatoshis > this.config.maxAmountPerWithdrawal) {
+      const amountZec = zatoshisToZec(amountZatoshis);
+      const maxZec = zatoshisToZec(this.config.maxAmountPerWithdrawal);
       return {
         allowed: false,
-        reason: `Amount ${amount} ZEC exceeds maximum single withdrawal of ${this.config.maxAmountPerWithdrawal} ZEC`,
+        reason: `Amount ${amountZec} ZEC exceeds maximum single withdrawal of ${maxZec} ZEC`,
         usage,
       };
     }
 
     // Check daily total amount
-    const projectedTotalToday = usage.totalAmountToday + amount;
+    const projectedTotalToday = usage.totalAmountToday + amountZatoshis;
     if (projectedTotalToday > this.config.maxTotalAmountPerDay) {
-      const remaining = this.config.maxTotalAmountPerDay - usage.totalAmountToday;
+      const remainingZatoshis = this.config.maxTotalAmountPerDay - usage.totalAmountToday;
+      const remainingZec = zatoshisToZec(remainingZatoshis);
       return {
         allowed: false,
-        reason: `Daily amount limit exceeded. Maximum remaining: ${remaining.toFixed(8)} ZEC`,
+        reason: `Daily amount limit exceeded. Maximum remaining: ${remainingZec.toFixed(8)} ZEC`,
         usage,
       };
     }
@@ -267,9 +281,9 @@ export class WithdrawalRateLimiter {
    * Records a successful withdrawal
    *
    * @param userId - The user identifier
-   * @param amount - The withdrawal amount in ZEC
+   * @param amountZatoshis - The withdrawal amount in zatoshis
    */
-  recordWithdrawal(userId: string, amount: number): void {
+  recordWithdrawal(userId: string, amountZatoshis: bigint): void {
     const now = this.getNow();
     const state = this.getOrCreateUserState(userId);
 
@@ -278,7 +292,7 @@ export class WithdrawalRateLimiter {
 
     // Add new withdrawal record
     state.withdrawals.push({
-      amount,
+      amount: amountZatoshis,
       timestamp: now,
     });
 
@@ -314,6 +328,11 @@ export class WithdrawalRateLimiter {
     const hourResetAt = this.getNextHourBoundary(now);
     const dayResetAt = this.getNextDayBoundary(now);
 
+    // Calculate remaining amount (bigint comparison)
+    const remainingAmount = this.config.maxTotalAmountPerDay > usage.totalAmountToday
+      ? this.config.maxTotalAmountPerDay - usage.totalAmountToday
+      : 0n;
+
     return {
       withdrawalsRemainingHour: Math.max(
         0,
@@ -324,10 +343,7 @@ export class WithdrawalRateLimiter {
         this.config.maxWithdrawalsPerDay - usage.withdrawalsThisDay
       ),
       maxSingleWithdrawal: this.config.maxAmountPerWithdrawal,
-      amountRemainingToday: Math.max(
-        0,
-        this.config.maxTotalAmountPerDay - usage.totalAmountToday
-      ),
+      amountRemainingToday: remainingAmount,
       cooldownRemainingMs,
       hourResetAt,
       dayResetAt,
@@ -388,7 +404,7 @@ export class WithdrawalRateLimiter {
 
     let withdrawalsThisHour = 0;
     let withdrawalsThisDay = 0;
-    let totalAmountToday = 0;
+    let totalAmountToday = 0n;
 
     for (const withdrawal of state.withdrawals) {
       if (withdrawal.timestamp >= dayStart) {
@@ -462,27 +478,27 @@ export function createRateLimiter(config?: Partial<RateLimitConfig>): Withdrawal
 }
 
 /**
- * Pre-configured rate limiter for conservative limits
+ * Pre-configured rate limiter for conservative limits (amounts in zatoshis)
  */
 export function createConservativeRateLimiter(): WithdrawalRateLimiter {
   return new WithdrawalRateLimiter({
     maxWithdrawalsPerHour: 3,
     maxWithdrawalsPerDay: 10,
-    maxAmountPerWithdrawal: 10,
-    maxTotalAmountPerDay: 50,
+    maxAmountPerWithdrawal: 10_00000000n, // 10 ZEC
+    maxTotalAmountPerDay: 50_00000000n, // 50 ZEC
     cooldownMs: 300000, // 5 minutes
   });
 }
 
 /**
- * Pre-configured rate limiter for high-volume exchanges
+ * Pre-configured rate limiter for high-volume exchanges (amounts in zatoshis)
  */
 export function createHighVolumeRateLimiter(): WithdrawalRateLimiter {
   return new WithdrawalRateLimiter({
     maxWithdrawalsPerHour: 100,
     maxWithdrawalsPerDay: 500,
-    maxAmountPerWithdrawal: 1000,
-    maxTotalAmountPerDay: 10000,
+    maxAmountPerWithdrawal: 1000_00000000n, // 1000 ZEC
+    maxTotalAmountPerDay: 10000_00000000n, // 10000 ZEC
     cooldownMs: 10000, // 10 seconds
   });
 }

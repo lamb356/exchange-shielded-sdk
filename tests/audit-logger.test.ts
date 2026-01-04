@@ -557,6 +557,9 @@ describe('AuditLogger', () => {
   });
 });
 
+// Helper constant for zatoshis (1 ZEC = 100_000_000 zatoshis)
+const ZAT = 100_000_000n;
+
 describe('ComplianceManager', () => {
   let manager: ComplianceManager;
 
@@ -566,20 +569,20 @@ describe('ComplianceManager', () => {
 
   describe('checkVelocity', () => {
     it('should pass for first transaction', () => {
-      const result = manager.checkVelocity('user-1', 10);
+      const result = manager.checkVelocity('user-1', 10n * ZAT);
 
       expect(result.passed).toBe(true);
       expect(result.riskScore).toBeGreaterThanOrEqual(0);
     });
 
     it('should track velocity over multiple transactions', () => {
-      manager.recordTransaction('user-1', 50);
-      manager.recordTransaction('user-1', 50);
+      manager.recordTransaction('user-1', 50n * ZAT);
+      manager.recordTransaction('user-1', 50n * ZAT);
 
-      const result = manager.checkVelocity('user-1', 50);
+      const result = manager.checkVelocity('user-1', 50n * ZAT);
 
       expect(result.velocity.last24Hours).toBe(2);
-      expect(result.velocity.amountLast24Hours).toBe(100);
+      expect(result.velocity.amountLast24Hours).toBe(100n * ZAT);
     });
 
     it('should fail when velocity threshold exceeded', () => {
@@ -587,15 +590,15 @@ describe('ComplianceManager', () => {
         velocityThresholds: {
           maxTransactionsPerHour: 2,
           maxTransactionsPerDay: 10,
-          maxAmountPerHour: 100,
-          maxAmountPerDay: 1000,
+          maxAmountPerHour: 100n * ZAT,
+          maxAmountPerDay: 1000n * ZAT,
         },
       });
 
-      strictManager.recordTransaction('user-1', 10);
-      strictManager.recordTransaction('user-1', 10);
+      strictManager.recordTransaction('user-1', 10n * ZAT);
+      strictManager.recordTransaction('user-1', 10n * ZAT);
 
-      const result = strictManager.checkVelocity('user-1', 10);
+      const result = strictManager.checkVelocity('user-1', 10n * ZAT);
 
       expect(result.passed).toBe(false);
       expect(result.reason).toContain('Hourly transaction limit');
@@ -604,10 +607,10 @@ describe('ComplianceManager', () => {
     it('should calculate risk score', () => {
       // Make some transactions to increase risk
       for (let i = 0; i < 5; i++) {
-        manager.recordTransaction('user-1', 50);
+        manager.recordTransaction('user-1', 50n * ZAT);
       }
 
-      const result = manager.checkVelocity('user-1', 50);
+      const result = manager.checkVelocity('user-1', 50n * ZAT);
 
       expect(result.riskScore).toBeGreaterThan(0);
     });

@@ -3,6 +3,8 @@
  *
  * Tests for concurrent operations to ensure thread safety and correct
  * behavior under parallel execution.
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 
 import {
@@ -11,6 +13,9 @@ import {
   setValidationOptions,
   resetValidationOptions,
 } from '../src/index.js';
+
+// Helper constant for zatoshis (1 ZEC = 100_000_000 zatoshis)
+const ZAT = 100_000_000n;
 
 // Use format-only validation for tests (fake addresses don't have valid checksums)
 beforeAll(() => {
@@ -30,10 +35,10 @@ describe('Concurrent Request ID Handling', () => {
         auth: { username: 'user', password: 'pass' },
       },
       rateLimiter: {
-        maxAmountPerWithdrawal: 5, // Low limit to trigger rate limit
+        maxAmountPerWithdrawal: 5n * ZAT, // 5 ZEC limit to trigger rate limit
         maxWithdrawalsPerHour: 10,
         maxWithdrawalsPerDay: 50,
-        maxTotalAmountPerDay: 500,
+        maxTotalAmountPerDay: 500n * ZAT,
         cooldownMs: 0,
       },
     });
@@ -45,7 +50,7 @@ describe('Concurrent Request ID Handling', () => {
         'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
       toAddress:
         'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-      amount: 10, // Exceeds 5 ZEC limit, will fail
+      amount: 10n * ZAT, // Exceeds 5 ZEC limit, will fail
       requestId,
     };
 
@@ -82,10 +87,10 @@ describe('Concurrent Request ID Handling', () => {
         auth: { username: 'user', password: 'pass' },
       },
       rateLimiter: {
-        maxAmountPerWithdrawal: 100,
+        maxAmountPerWithdrawal: 100n * ZAT,
         maxWithdrawalsPerHour: 100,
         maxWithdrawalsPerDay: 500,
-        maxTotalAmountPerDay: 5000,
+        maxTotalAmountPerDay: 5000n * ZAT,
         cooldownMs: 0,
       },
     });
@@ -97,7 +102,7 @@ describe('Concurrent Request ID Handling', () => {
         'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
       toAddress:
         'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-      amount: 1,
+      amount: 1n * ZAT,
       requestId: `parallel-request-${i}-${Date.now()}`,
     }));
 
@@ -121,10 +126,10 @@ describe('Concurrent Rate Limit Handling', () => {
         auth: { username: 'user', password: 'pass' },
       },
       rateLimiter: {
-        maxAmountPerWithdrawal: 0.5, // Very low limit - each 1 ZEC request exceeds it
+        maxAmountPerWithdrawal: 50000000n, // 0.5 ZEC - each 1 ZEC request exceeds it
         maxWithdrawalsPerHour: 100,
         maxWithdrawalsPerDay: 100,
-        maxTotalAmountPerDay: 1000,
+        maxTotalAmountPerDay: 1000n * ZAT,
         cooldownMs: 0,
       },
     });
@@ -138,7 +143,7 @@ describe('Concurrent Rate Limit Handling', () => {
         'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
       toAddress:
         'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-      amount: 1, // Exceeds 0.5 ZEC limit
+      amount: 1n * ZAT, // Exceeds 0.5 ZEC limit
       requestId: `rate-limit-test-${i}-${Date.now()}`,
     }));
 
@@ -165,11 +170,11 @@ describe('Concurrent Rate Limit Handling', () => {
 
     const userId = 'velocity-test-user';
 
-    // Check velocity in parallel
+    // Check velocity in parallel (amounts in zatoshis)
     const results = await Promise.all([
-      Promise.resolve(sdk.checkVelocity(userId, 10)),
-      Promise.resolve(sdk.checkVelocity(userId, 20)),
-      Promise.resolve(sdk.checkVelocity(userId, 30)),
+      Promise.resolve(sdk.checkVelocity(userId, 10n * ZAT)),
+      Promise.resolve(sdk.checkVelocity(userId, 20n * ZAT)),
+      Promise.resolve(sdk.checkVelocity(userId, 30n * ZAT)),
     ]);
 
     // All should return valid results
@@ -201,7 +206,7 @@ describe('Concurrent Audit Logging', () => {
         'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
       toAddress:
         'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-      amount: 1,
+      amount: 1n * ZAT,
       requestId: `audit-test-${i}-${Date.now()}`,
     }));
 
@@ -234,7 +239,7 @@ describe('Race Condition Prevention', () => {
         'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
       toAddress:
         'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-      amount: 100,
+      amount: 100n * ZAT,
       requestId,
     };
 

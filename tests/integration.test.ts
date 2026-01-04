@@ -2,6 +2,7 @@
  * Integration Tests
  *
  * Tests for the full SDK workflow including security and compliance.
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 
 import {
@@ -11,6 +12,9 @@ import {
   setValidationOptions,
   resetValidationOptions,
 } from '../src/index.js';
+
+// Helper constant for zatoshis (1 ZEC = 100_000_000 zatoshis)
+const ZAT = 100_000_000n;
 
 // Use format-only validation for tests (fake addresses don't have valid checksums)
 beforeAll(() => {
@@ -138,7 +142,7 @@ describe('ExchangeShieldedSDK Integration', () => {
         userId: 'user-1',
         fromAddress: 'invalid-address',
         toAddress: saplingDest,
-        amount: 10,
+        amount: 10n * ZAT,
       });
 
       expect(result.success).toBe(false);
@@ -151,7 +155,7 @@ describe('ExchangeShieldedSDK Integration', () => {
         userId: 'user-1',
         fromAddress: 't1Rv4exT7bqhZqi2j7xz8bUHDMxwosrjADU', // transparent address
         toAddress: saplingDest,
-        amount: 10,
+        amount: 10n * ZAT,
       });
 
       expect(result.success).toBe(false);
@@ -164,7 +168,7 @@ describe('ExchangeShieldedSDK Integration', () => {
         userId: 'user-1',
         fromAddress: saplingSource,
         toAddress: 'invalid-address',
-        amount: 10,
+        amount: 10n * ZAT,
       });
 
       expect(result.success).toBe(false);
@@ -176,7 +180,7 @@ describe('ExchangeShieldedSDK Integration', () => {
         userId: 'user-1',
         fromAddress: saplingSource,
         toAddress: saplingDest,
-        amount: -10,
+        amount: -10n,
       });
 
       expect(result.success).toBe(false);
@@ -188,7 +192,7 @@ describe('ExchangeShieldedSDK Integration', () => {
         userId: 'user-1',
         fromAddress: saplingSource,
         toAddress: saplingDest,
-        amount: 10,
+        amount: 10n * ZAT,
         memo: 'not-hex!@#$',
       });
 
@@ -199,7 +203,7 @@ describe('ExchangeShieldedSDK Integration', () => {
 
   describe('Rate Limiting Integration', () => {
     it('should check rate limits before processing', () => {
-      const result = sdk.checkRateLimit('user-1', 10);
+      const result = sdk.checkRateLimit('user-1', 10n * ZAT);
 
       expect(result).toBeDefined();
       expect(typeof result.allowed).toBe('boolean');
@@ -216,24 +220,24 @@ describe('ExchangeShieldedSDK Integration', () => {
         rateLimiter: {
           maxWithdrawalsPerHour: 1,
           maxWithdrawalsPerDay: 5,
-          maxAmountPerWithdrawal: 100,
-          maxTotalAmountPerDay: 500,
+          maxAmountPerWithdrawal: 100n * ZAT,
+          maxTotalAmountPerDay: 500n * ZAT,
           cooldownMs: 60000,
         },
       });
 
       // First check should pass
-      const check1 = strictSdk.checkRateLimit('user-1', 10);
+      const check1 = strictSdk.checkRateLimit('user-1', 10n * ZAT);
       expect(check1.allowed).toBe(true);
 
       // Simulate a recorded withdrawal by checking velocity
-      strictSdk.checkVelocity('user-1', 10);
+      strictSdk.checkVelocity('user-1', 10n * ZAT);
     });
   });
 
   describe('Velocity Check Integration', () => {
     it('should check velocity before processing', () => {
-      const result = sdk.checkVelocity('user-1', 10);
+      const result = sdk.checkVelocity('user-1', 10n * ZAT);
 
       expect(result).toBeDefined();
       expect(typeof result.passed).toBe('boolean');
@@ -243,25 +247,24 @@ describe('ExchangeShieldedSDK Integration', () => {
 
   describe('Fee Estimation', () => {
     it('should estimate fee for shielded withdrawal', async () => {
-      const estimate = await sdk.estimateWithdrawalFee(10, saplingDest);
+      const estimate = await sdk.estimateWithdrawalFee(10n * ZAT, saplingDest);
 
-      expect(estimate.feeZec).toBeGreaterThan(0);
-      expect(estimate.feeZatoshis).toBeGreaterThan(0);
+      expect(estimate.feeZatoshis).toBeGreaterThan(0n);
       expect(estimate.isApproximate).toBe(true);
     });
 
     it('should estimate fee for transparent destination', async () => {
       const estimate = await sdk.estimateWithdrawalFee(
-        10,
+        10n * ZAT,
         't1Rv4exT7bqhZqi2j7xz8bUHDMxwosrjADU'
       );
 
-      expect(estimate.feeZec).toBeGreaterThan(0);
+      expect(estimate.feeZatoshis).toBeGreaterThan(0n);
     });
 
     it('should throw for invalid destination', async () => {
       await expect(
-        sdk.estimateWithdrawalFee(10, 'invalid-address')
+        sdk.estimateWithdrawalFee(10n * ZAT, 'invalid-address')
       ).rejects.toThrow();
     });
   });
@@ -286,7 +289,7 @@ describe('ExchangeShieldedSDK Integration', () => {
       const initialCount = auditLogger.getEventCount();
 
       // Check velocity (which logs)
-      sdk.checkVelocity('user-1', 10);
+      sdk.checkVelocity('user-1', 10n * ZAT);
 
       // Count may or may not increase depending on implementation
       expect(auditLogger.getEventCount()).toBeGreaterThanOrEqual(initialCount);
@@ -392,7 +395,7 @@ describe('Security Integration', () => {
           '  zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly  ',
         toAddress:
           'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-        amount: 10,
+        amount: 10n * ZAT,
       });
 
       // Will fail at RPC level, but should pass validation
@@ -421,7 +424,7 @@ describe('Security Integration', () => {
           'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
         toAddress:
           'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-        amount: 10,
+        amount: 10n * ZAT,
       });
 
       // Should have logged events
@@ -440,24 +443,28 @@ describe('Security Integration', () => {
           auth: { username: 'user', password: 'pass' },
         },
         rateLimiter: {
-          maxAmountPerWithdrawal: 5, // Very low limit
+          maxAmountPerWithdrawal: 5n * ZAT, // 5 ZEC limit
           maxWithdrawalsPerHour: 10,
           maxWithdrawalsPerDay: 50,
-          maxTotalAmountPerDay: 500,
+          maxTotalAmountPerDay: 500n * ZAT,
           cooldownMs: 0,
         },
         enableAuditLogging: true,
       });
 
-      // Try withdrawal exceeding limit
-      await sdk.processWithdrawal({
+      // Try withdrawal exceeding per-withdrawal limit
+      const result = await sdk.processWithdrawal({
         userId: 'rate-limit-test-user',
         fromAddress:
           'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
         toAddress:
           'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-        amount: 10, // Exceeds 5 ZEC limit
+        amount: 10n * ZAT, // Exceeds 5 ZEC limit
       });
+
+      // Verify the rate limit was triggered
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('RATE_LIMITED');
 
       const auditLogger = sdk.getAuditLogger();
       const rateLimitEvents = auditLogger.getEvents({
@@ -477,10 +484,10 @@ describe('Security Integration', () => {
           auth: { username: 'user', password: 'pass' },
         },
         rateLimiter: {
-          maxAmountPerWithdrawal: 5, // Low limit to trigger a failure
+          maxAmountPerWithdrawal: 5n * ZAT, // 5 ZEC limit
           maxWithdrawalsPerHour: 10,
           maxWithdrawalsPerDay: 50,
-          maxTotalAmountPerDay: 500,
+          maxTotalAmountPerDay: 500n * ZAT,
           cooldownMs: 0,
         },
       });
@@ -492,7 +499,7 @@ describe('Security Integration', () => {
           'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
         toAddress:
           'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-        amount: 10, // Exceeds 5 ZEC limit
+        amount: 10n * ZAT, // Exceeds 5 ZEC limit
         requestId,
       };
 
@@ -530,7 +537,7 @@ describe('Security Integration', () => {
         fromAddress: 'invalid-address',
         toAddress:
           'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-        amount: 1,
+        amount: 1n * ZAT,
         requestId,
       });
       expect(result1.success).toBe(false);
@@ -544,7 +551,7 @@ describe('Security Integration', () => {
           'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
         toAddress:
           'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
-        amount: 1,
+        amount: 1n * ZAT,
         requestId,
       });
 
