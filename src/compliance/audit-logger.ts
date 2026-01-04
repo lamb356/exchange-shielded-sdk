@@ -16,6 +16,57 @@ import { createHash } from 'crypto';
 import { redactSensitiveData } from '../security/sanitizer.js';
 
 /**
+ * Shielded address prefixes that should be redacted in audit logs
+ * Includes mainnet and testnet variants for all shielded address types
+ */
+const SHIELDED_PREFIXES = [
+  'zs',           // Sapling mainnet
+  'ztestsapling', // Sapling testnet
+  'zc',           // Sprout mainnet
+  'zt',           // Sprout testnet (when not followed by 'estsapling')
+  'u1',           // Unified mainnet
+  'utest',        // Unified testnet
+] as const;
+
+/**
+ * Checks if an address has a shielded prefix that should be redacted
+ *
+ * @param address - The address to check
+ * @returns true if the address starts with a shielded prefix
+ */
+export function isShieldedPrefix(address: string): boolean {
+  if (!address || typeof address !== 'string') {
+    return false;
+  }
+
+  const lowerAddr = address.toLowerCase();
+
+  // Check each prefix - order matters for overlapping prefixes
+  // Check ztestsapling before zt to avoid false positives
+  if (lowerAddr.startsWith('ztestsapling')) {
+    return true;
+  }
+  if (lowerAddr.startsWith('zs')) {
+    return true;
+  }
+  if (lowerAddr.startsWith('zc')) {
+    return true;
+  }
+  if (lowerAddr.startsWith('zt')) {
+    // zt that's NOT ztestsapling is Sprout testnet
+    return true;
+  }
+  if (lowerAddr.startsWith('u1')) {
+    return true;
+  }
+  if (lowerAddr.startsWith('utest')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Types of audit events
  */
 export enum AuditEventType {
@@ -287,8 +338,8 @@ export class AuditLogger {
       if (metadata) {
         metadata = redactSensitiveData(metadata) as Record<string, unknown>;
       }
-      if (destinationAddress && destinationAddress.startsWith('zs')) {
-        // Partially redact shielded addresses
+      if (destinationAddress && isShieldedPrefix(destinationAddress)) {
+        // Partially redact ALL shielded addresses (zs, ztestsapling, zc, zt, u1, utest)
         destinationAddress =
           destinationAddress.slice(0, 6) + '...' + destinationAddress.slice(-4);
       }

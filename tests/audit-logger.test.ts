@@ -10,6 +10,7 @@ import {
   AuditSeverity,
   createAuditLogger,
   getDefaultSeverity,
+  isShieldedPrefix,
   ComplianceManager,
   createComplianceManager,
 } from '../src/compliance/index.js';
@@ -53,7 +54,7 @@ describe('AuditLogger', () => {
       expect(event.metadata).toEqual({ note: 'test' });
     });
 
-    it('should auto-redact shielded addresses', () => {
+    it('should auto-redact Sapling (zs) addresses', () => {
       const addr = 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly';
       const event = logger.log({
         eventType: AuditEventType.WITHDRAWAL_REQUESTED,
@@ -63,6 +64,78 @@ describe('AuditLogger', () => {
 
       expect(event.destinationAddress).toContain('...');
       expect(event.destinationAddress?.length).toBeLessThan(addr.length);
+    });
+
+    it('should auto-redact Sapling testnet (ztestsapling) addresses', () => {
+      const addr = 'ztestsapling1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly';
+      const event = logger.log({
+        eventType: AuditEventType.WITHDRAWAL_REQUESTED,
+        severity: AuditSeverity.INFO,
+        destinationAddress: addr,
+      });
+
+      expect(event.destinationAddress).toContain('...');
+      expect(event.destinationAddress?.length).toBeLessThan(addr.length);
+    });
+
+    it('should auto-redact Sprout (zc) addresses', () => {
+      const addr = 'zcAbCdEfGhIjKlMnOpQrStUvWxYz1234567890AbCdEfGhIjKlMnOpQrStUvWxYz1234567890AbCdEf';
+      const event = logger.log({
+        eventType: AuditEventType.WITHDRAWAL_REQUESTED,
+        severity: AuditSeverity.INFO,
+        destinationAddress: addr,
+      });
+
+      expect(event.destinationAddress).toContain('...');
+      expect(event.destinationAddress?.length).toBeLessThan(addr.length);
+    });
+
+    it('should auto-redact Sprout testnet (zt) addresses', () => {
+      const addr = 'ztAbCdEfGhIjKlMnOpQrStUvWxYz1234567890AbCdEfGhIjKlMnOpQrStUvWxYz1234567890AbCdEf';
+      const event = logger.log({
+        eventType: AuditEventType.WITHDRAWAL_REQUESTED,
+        severity: AuditSeverity.INFO,
+        destinationAddress: addr,
+      });
+
+      expect(event.destinationAddress).toContain('...');
+      expect(event.destinationAddress?.length).toBeLessThan(addr.length);
+    });
+
+    it('should auto-redact Unified (u1) addresses', () => {
+      const addr = 'u1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
+      const event = logger.log({
+        eventType: AuditEventType.WITHDRAWAL_REQUESTED,
+        severity: AuditSeverity.INFO,
+        destinationAddress: addr,
+      });
+
+      expect(event.destinationAddress).toContain('...');
+      expect(event.destinationAddress?.length).toBeLessThan(addr.length);
+    });
+
+    it('should auto-redact Unified testnet (utest) addresses', () => {
+      const addr = 'utestqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
+      const event = logger.log({
+        eventType: AuditEventType.WITHDRAWAL_REQUESTED,
+        severity: AuditSeverity.INFO,
+        destinationAddress: addr,
+      });
+
+      expect(event.destinationAddress).toContain('...');
+      expect(event.destinationAddress?.length).toBeLessThan(addr.length);
+    });
+
+    it('should NOT redact transparent (t1) addresses', () => {
+      const addr = 't1Rv4exT7bqhZqi2j7xz8bUHDMxwosrjADU';
+      const event = logger.log({
+        eventType: AuditEventType.WITHDRAWAL_REQUESTED,
+        severity: AuditSeverity.INFO,
+        destinationAddress: addr,
+      });
+
+      // Transparent addresses should NOT be redacted
+      expect(event.destinationAddress).toBe(addr);
     });
 
     it('should create unique event IDs', () => {
@@ -431,6 +504,55 @@ describe('AuditLogger', () => {
       const logger = createAuditLogger({ maxEvents: 100 });
 
       expect(logger).toBeInstanceOf(AuditLogger);
+    });
+  });
+
+  describe('isShieldedPrefix', () => {
+    it('should return true for Sapling mainnet (zs)', () => {
+      expect(isShieldedPrefix('zs1abc123')).toBe(true);
+    });
+
+    it('should return true for Sapling testnet (ztestsapling)', () => {
+      expect(isShieldedPrefix('ztestsapling1abc123')).toBe(true);
+    });
+
+    it('should return true for Sprout mainnet (zc)', () => {
+      expect(isShieldedPrefix('zcABC123')).toBe(true);
+    });
+
+    it('should return true for Sprout testnet (zt)', () => {
+      expect(isShieldedPrefix('ztABC123')).toBe(true);
+    });
+
+    it('should return true for Unified mainnet (u1)', () => {
+      expect(isShieldedPrefix('u1abc123')).toBe(true);
+    });
+
+    it('should return true for Unified testnet (utest)', () => {
+      expect(isShieldedPrefix('utestabc123')).toBe(true);
+    });
+
+    it('should return false for transparent (t1) addresses', () => {
+      expect(isShieldedPrefix('t1Rv4exT7bqhZqi2j7xz8bUHDMxwosrjADU')).toBe(false);
+    });
+
+    it('should return false for transparent (t3) addresses', () => {
+      expect(isShieldedPrefix('t3abc123')).toBe(false);
+    });
+
+    it('should return false for null/undefined', () => {
+      expect(isShieldedPrefix(null as unknown as string)).toBe(false);
+      expect(isShieldedPrefix(undefined as unknown as string)).toBe(false);
+    });
+
+    it('should return false for empty string', () => {
+      expect(isShieldedPrefix('')).toBe(false);
+    });
+
+    it('should be case-insensitive', () => {
+      expect(isShieldedPrefix('ZS1abc123')).toBe(true);
+      expect(isShieldedPrefix('ZTESTSAPLING1abc')).toBe(true);
+      expect(isShieldedPrefix('U1abc123')).toBe(true);
     });
   });
 });

@@ -145,6 +145,7 @@ export {
   AuditSeverity,
   createAuditLogger,
   getDefaultSeverity,
+  isShieldedPrefix,
   // Compliance Manager
   ComplianceManager,
   createComplianceManager,

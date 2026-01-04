@@ -14,6 +14,7 @@ export {
   AuditSeverity,
   createAuditLogger,
   getDefaultSeverity,
+  isShieldedPrefix,
 } from './audit-logger.js';
 
 export type {
