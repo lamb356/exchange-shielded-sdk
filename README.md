@@ -1,15 +1,16 @@
-# Exchange Shielded Withdrawal SDK
+# Exchange Shielded SDK
 
-A TypeScript SDK for validating Zcash addresses, supporting transparent, Sprout, Sapling, and Unified address formats.
+A TypeScript SDK for cryptocurrency exchanges to process Zcash shielded withdrawals securely and compliantly.
 
 ## Features
 
-- Validate Zcash addresses (transparent, Sprout, Sapling, Unified)
-- Detect shielded vs transparent addresses
-- Parse Unified Address components
-- TypeScript-first with full type definitions
-- ES Module support
-- Zero runtime dependencies
+- **Address Validation**: Full support for transparent (t1/t3), Sapling (zs), and Unified (u1) addresses
+- **Shielded Transactions**: Build and submit shielded withdrawals with ZIP 317 fee estimation
+- **RPC Client**: Type-safe JSON-RPC client for zcashd/zebrad communication
+- **Security**: AES-256-GCM key encryption, input sanitization, and secure key handling
+- **Rate Limiting**: Configurable sliding window rate limits per user
+- **Audit Logging**: Tamper-evident hash chain audit logs for compliance
+- **Compliance**: Velocity checks, suspicious activity detection, and viewing key export
 
 ## Installation
 
@@ -17,75 +18,205 @@ A TypeScript SDK for validating Zcash addresses, supporting transparent, Sprout,
 npm install exchange-shielded-sdk
 ```
 
-## Usage
+## Quick Start
 
-### Basic Address Validation
-
-```typescript
-import { validateAddress, isShielded } from 'exchange-shielded-sdk';
-
-// Validate address type
-const type = validateAddress('t1Rv4exT7bqhZqi2j7xz8bUHDMxwosrjADU');
-console.log(type); // 'transparent'
-
-const saplingType = validateAddress('zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly');
-console.log(saplingType); // 'sapling'
-
-// Check if address is shielded
-const shielded = isShielded('zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly');
-console.log(shielded); // true
-```
-
-### Detailed Validation
+### Basic Withdrawal
 
 ```typescript
-import { validateAddressDetailed } from 'exchange-shielded-sdk';
+import { createExchangeSDK } from 'exchange-shielded-sdk';
 
-const result = validateAddressDetailed('t1Rv4exT7bqhZqi2j7xz8bUHDMxwosrjADU');
-console.log(result);
-// {
-//   valid: true,
-//   type: 'transparent',
-//   shielded: false,
-//   network: 'mainnet'
-// }
+// Initialize the SDK
+const sdk = createExchangeSDK({
+  rpc: {
+    host: '127.0.0.1',
+    port: 8232,
+    auth: { username: 'rpcuser', password: 'rpcpassword' }
+  },
+  enableCompliance: true,
+  enableAuditLogging: true
+});
 
-const invalid = validateAddressDetailed('invalid-address');
-console.log(invalid);
-// {
-//   valid: false,
-//   type: 'unknown',
-//   shielded: false,
-//   network: 'unknown',
-//   error: 'Unrecognized address format'
-// }
+// Process a withdrawal
+const result = await sdk.processWithdrawal({
+  userId: 'user-123',
+  fromAddress: 'zs1sourceaddress...',
+  toAddress: 'zs1destinationaddress...',
+  amount: 10.5
+});
+
+if (result.success) {
+  console.log('Transaction ID:', result.transactionId);
+} else {
+  console.error('Failed:', result.error);
+}
 ```
 
-### Unified Address Parsing
+### Address Validation
 
 ```typescript
-import { parseUnifiedAddress } from 'exchange-shielded-sdk';
+import { validateAddress, isShielded, validateAddressDetailed } from 'exchange-shielded-sdk';
 
-const components = parseUnifiedAddress('u1qw508d6qejxtdg4y5r3zarvary0c5xw7...');
-console.log(components);
-// {
-//   orchard: true,
-//   sapling: undefined,
-//   transparent: undefined
-// }
+// Quick validation
+const type = validateAddress('zs1abc...');  // Returns: 'sapling'
+const shielded = isShielded('zs1abc...');   // Returns: true
+
+// Detailed validation
+const details = validateAddressDetailed('t1abc...');
+// Returns: { valid: true, type: 'transparent', shielded: false, network: 'mainnet' }
 ```
 
-### Get Address Prefixes
+### Fee Estimation
 
 ```typescript
-import { getAddressPrefixes } from 'exchange-shielded-sdk';
+import { estimateTransactionFee, ZIP317 } from 'exchange-shielded-sdk';
 
-const mainnetPrefixes = getAddressPrefixes('sapling', 'mainnet');
-console.log(mainnetPrefixes); // ['zs']
+const fee = estimateTransactionFee({
+  saplingSpends: 1,
+  saplingOutputs: 2,
+  transparentOutputs: 1
+});
 
-const testnetPrefixes = getAddressPrefixes('transparent', 'testnet');
-console.log(testnetPrefixes); // ['tm', 't2']
+console.log(`Fee: ${fee.zec} ZEC (${fee.zatoshis} zatoshis)`);
+console.log(`Logical actions: ${fee.logicalActions}`);
 ```
+
+## API Reference
+
+### Address Validation
+
+| Function | Description |
+|----------|-------------|
+| `validateAddress(address)` | Returns address type: `'transparent'`, `'sapling'`, `'unified'`, or `'unknown'` |
+| `isShielded(address)` | Returns `true` if address is shielded (zs, u1) |
+| `validateAddressDetailed(address)` | Returns detailed validation result with type, network, and shielded status |
+| `parseUnifiedAddress(ua)` | Parses unified address components (orchard, sapling, transparent) |
+| `getAddressPrefixes(type, network)` | Returns valid prefixes for address type and network |
+
+### Transaction Builder
+
+| Class/Function | Description |
+|----------------|-------------|
+| `ShieldedTransactionBuilder` | Builds shielded withdrawal transactions |
+| `estimateTransactionFee(options)` | Estimates ZIP 317 compliant fee |
+| `calculateLogicalActions(options)` | Calculates logical actions for fee |
+| `ZIP317` | Fee calculation constants |
+
+### RPC Client
+
+| Class/Function | Description |
+|----------------|-------------|
+| `ZcashRpcClient` | JSON-RPC client for zcashd |
+| `createRpcClient(host, port, auth)` | Factory function for RpcClient |
+
+**Key Methods:**
+- `z_sendmany()` - Send shielded transactions
+- `z_getbalance()` - Get address balance
+- `z_listunspent()` - List unspent notes
+- `waitForOperation()` - Wait for async operation completion
+
+### Security
+
+| Class/Function | Description |
+|----------------|-------------|
+| `SecureKeyManager` | AES-256-GCM encrypted key storage |
+| `WithdrawalRateLimiter` | Sliding window rate limiting |
+| `sanitizeAddress()` | Validate and sanitize address input |
+| `sanitizeAmount()` | Validate and sanitize amount input |
+| `redactSensitiveData()` | Redact sensitive fields for logging |
+
+### Compliance
+
+| Class/Function | Description |
+|----------------|-------------|
+| `AuditLogger` | Tamper-evident audit logging |
+| `ComplianceManager` | Velocity checks and compliance reporting |
+| `AuditEventType` | Enum of audit event types |
+| `AuditSeverity` | Enum of severity levels |
+
+### High-Level SDK
+
+| Class/Function | Description |
+|----------------|-------------|
+| `ExchangeShieldedSDK` | Unified SDK combining all features |
+| `createExchangeSDK(config)` | Factory function for SDK |
+
+## Configuration Options
+
+### SDK Configuration
+
+```typescript
+interface SDKConfig {
+  rpc: {
+    host: string;           // zcashd host (default: '127.0.0.1')
+    port: number;           // zcashd port (default: 8232)
+    auth: {
+      username: string;
+      password: string;
+    };
+    timeout?: number;       // Request timeout in ms (default: 30000)
+    https?: boolean;        // Use HTTPS (default: false)
+  };
+  keyManager?: {
+    maxKeys?: number;           // Max keys in memory (default: 100)
+    autoClearAfterMs?: number;  // Auto-clear inactive keys (default: 0 = disabled)
+  };
+  rateLimiter?: {
+    maxWithdrawalsPerHour?: number;    // Default: 10
+    maxWithdrawalsPerDay?: number;     // Default: 50
+    maxAmountPerWithdrawal?: number;   // Default: 100 ZEC
+    maxTotalAmountPerDay?: number;     // Default: 1000 ZEC
+    cooldownMs?: number;               // Default: 60000 (1 min)
+  };
+  enableCompliance?: boolean;    // Enable compliance features (default: true)
+  enableAuditLogging?: boolean;  // Enable audit logging (default: true)
+  minconf?: number;              // Minimum confirmations (default: 10)
+  privacyPolicy?: string;        // Privacy policy (default: 'FullPrivacy')
+}
+```
+
+## Security Features
+
+### Key Management
+
+- **AES-256-GCM Encryption**: Keys are encrypted at rest using AES-256-GCM with scrypt key derivation
+- **Memory Protection**: Keys are securely zeroed when cleared
+- **No Key Logging**: Keys never appear in logs, errors, or stack traces
+- **Auto-Clear**: Optional automatic clearing of inactive keys
+
+### Input Sanitization
+
+- All user inputs are validated and sanitized before processing
+- Addresses are validated for correct format and type
+- Amounts are validated for reasonable bounds
+- Memos are validated for hex encoding and length limits
+
+### Rate Limiting
+
+- Per-user sliding window rate limits
+- Configurable limits for withdrawals per hour/day
+- Maximum amount per withdrawal and per day
+- Cooldown period between withdrawals
+
+## Compliance Features
+
+### Audit Logging
+
+- Tamper-evident hash chain linking all events
+- Automatic redaction of sensitive data
+- Configurable severity levels
+- Export for compliance review
+
+### Velocity Checks
+
+- Detect unusual withdrawal patterns
+- Risk scoring for each transaction
+- Automatic flagging of suspicious activity
+
+### Viewing Key Export
+
+- Export viewing keys for auditors
+- Bundle multiple keys with integrity hash
+- Configurable validity periods
 
 ## Address Types
 
@@ -100,49 +231,25 @@ console.log(testnetPrefixes); // ['tm', 't2']
 | Unified | `u1` | Bech32m | Multi-receiver address (NU5+) |
 | Unified (testnet) | `utest` | Bech32m | Testnet unified addresses |
 
-## API Reference
+## Requirements
 
-### Types
+- Node.js 18.0.0 or higher
+- Running zcashd or zebrad instance
+- TypeScript 5.0+ (for development)
 
-```typescript
-type AddressType = 'transparent' | 'sprout' | 'sapling' | 'orchard' | 'unified' | 'unknown';
+## Documentation
 
-interface UnifiedAddressComponents {
-  transparent?: string;
-  sapling?: string;
-  orchard?: boolean;
-}
+- [Full API Reference](./docs/API.md)
+- [Integration Guide](./docs/INTEGRATION-GUIDE.md)
+- [Security Best Practices](./docs/SECURITY-BEST-PRACTICES.md)
 
-interface AddressValidationResult {
-  valid: boolean;
-  type: AddressType;
-  shielded: boolean;
-  network: 'mainnet' | 'testnet' | 'unknown';
-  error?: string;
-}
-```
+## Examples
 
-### Functions
+See the [examples](./examples) directory for complete working examples:
 
-#### `validateAddress(address: string): AddressType`
-
-Detects the type of a Zcash address based on its prefix and format.
-
-#### `isShielded(address: string): boolean`
-
-Returns `true` if the address is a shielded type (Sprout, Sapling, Orchard, or Unified).
-
-#### `parseUnifiedAddress(ua: string): UnifiedAddressComponents`
-
-Parses a Unified Address to detect its component receivers. Note: Full parsing requires WASM bindings (planned for future versions).
-
-#### `validateAddressDetailed(address: string): AddressValidationResult`
-
-Performs comprehensive validation with detailed results including network detection.
-
-#### `getAddressPrefixes(type: AddressType, network?: 'mainnet' | 'testnet'): string[]`
-
-Returns the valid prefixes for a given address type and network.
+- [Basic Withdrawal](./examples/basic-withdrawal.ts)
+- [Compliance Setup](./examples/compliance-setup.ts)
+- [Rate Limiting](./examples/rate-limiting.ts)
 
 ## Development
 
@@ -160,13 +267,18 @@ npm test
 npm run test:coverage
 ```
 
-## Roadmap
+## Contributing
 
-- [ ] WASM bindings to librustzcash for cryptographic validation
-- [ ] Full Unified Address decoding (extract actual receiver addresses)
-- [ ] Address generation utilities
-- [ ] Viewing key support
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines.
+
+## Security
+
+See [SECURITY.md](./SECURITY.md) for security policy and vulnerability reporting.
 
 ## License
 
-MIT
+MIT License - see [LICENSE](./LICENSE) for details.
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for version history.

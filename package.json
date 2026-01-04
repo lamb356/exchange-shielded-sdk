@@ -1,7 +1,7 @@
 {
   "name": "exchange-shielded-sdk",
-  "version": "0.1.0",
-  "description": "SDK for exchange shielded withdrawals supporting Zcash address validation",
+  "version": "1.0.0",
+  "description": "TypeScript SDK for cryptocurrency exchanges to process Zcash shielded withdrawals securely and compliantly",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -10,10 +10,37 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./address-validator": {
+      "import": "./dist/address-validator.js",
+      "types": "./dist/address-validator.d.ts"
+    },
+    "./transaction-builder": {
+      "import": "./dist/transaction-builder.js",
+      "types": "./dist/transaction-builder.d.ts"
+    },
+    "./rpc-client": {
+      "import": "./dist/rpc-client.js",
+      "types": "./dist/rpc-client.d.ts"
+    },
+    "./security": {
+      "import": "./dist/security/index.js",
+      "types": "./dist/security/index.d.ts"
+    },
+    "./compliance": {
+      "import": "./dist/compliance/index.js",
+      "types": "./dist/compliance/index.d.ts"
+    },
+    "./sdk": {
+      "import": "./dist/sdk/index.js",
+      "types": "./dist/sdk/index.d.ts"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -21,7 +48,8 @@
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "lint": "eslint src tests",
     "clean": "rimraf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run clean && npm run build && npm test",
+    "prepare": "npm run build"
   },
   "keywords": [
     "zcash",
@@ -31,10 +59,29 @@
     "exchange",
     "sapling",
     "orchard",
-    "unified-address"
+    "unified-address",
+    "z-address",
+    "privacy",
+    "blockchain",
+    "crypto",
+    "withdrawal",
+    "transaction",
+    "rpc",
+    "compliance",
+    "audit",
+    "security",
+    "rate-limiting"
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/exchange-shielded-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/example/exchange-shielded-sdk/issues"
+  },
+  "homepage": "https://github.com/example/exchange-shielded-sdk#readme",
   "devDependencies": {
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.0",
