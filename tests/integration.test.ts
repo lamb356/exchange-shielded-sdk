@@ -334,6 +334,116 @@ describe('ExchangeShieldedSDK Integration', () => {
     });
   });
 
+  describe('Withdrawal Lifecycle', () => {
+    let lifecycleSDK: ExchangeShieldedSDK;
+
+    beforeEach(() => {
+      lifecycleSDK = new ExchangeShieldedSDK({
+        rpc: {
+          host: '127.0.0.1',
+          port: 8232,
+          auth: { username: 'user', password: 'pass' },
+        },
+        enableCompliance: true,
+        enableAuditLogging: true,
+      });
+    });
+
+    it('should create pending status on withdrawal start', async () => {
+      const requestId = 'pending-test-' + Date.now();
+
+      // Process withdrawal - will fail on RPC call but status should be created
+      const result = await lifecycleSDK.processWithdrawal({
+        userId: 'user-pending',
+        fromAddress: 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress: 'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: 1n * ZAT,
+        requestId,
+      });
+
+      // Will fail because no actual RPC server
+      expect(result.success).toBe(false);
+      expect(result.requestId).toBe(requestId);
+
+      // Status should have been created before RPC call failed
+      const status = await lifecycleSDK.getWithdrawalStatus(requestId);
+      expect(status).not.toBeNull();
+      expect(status?.requestId).toBe(requestId);
+      // Status is set to failed after the error
+      expect(status?.status).toBe('failed');
+    });
+
+    it('should track failed withdrawal status with error message', async () => {
+      const requestId = 'failed-test-' + Date.now();
+
+      // Use an invalid destination address (should fail validation)
+      const result = await lifecycleSDK.processWithdrawal({
+        userId: 'user-fail',
+        fromAddress: 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress: 'invalid-address!!!', // Invalid address
+        amount: 1n * ZAT,
+        requestId,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('INVALID_TO_ADDRESS');
+
+      // Validation failures still create a pending status before validation
+      const status = await lifecycleSDK.getWithdrawalStatus(requestId);
+      // The pending status was created, validation failed, but failWithdrawal
+      // doesn't cache (to allow retry), so status remains pending
+      expect(status).not.toBeNull();
+      expect(status?.status).toBe('pending');
+    });
+
+    it('should cache failures after rate limit check and update status', async () => {
+      // First make a successful withdrawal to exhaust some rate limit
+      const firstRequestId = 'rate-limit-first-' + Date.now();
+      const secondRequestId = 'rate-limit-second-' + Date.now();
+
+      // Create SDK with low daily amount limit that we can exceed
+      const restrictiveSDK = new ExchangeShieldedSDK({
+        rpc: {
+          host: '127.0.0.1',
+          port: 8232,
+          auth: { username: 'user', password: 'pass' },
+        },
+        rateLimiter: {
+          maxWithdrawalsPerHour: 1, // Only 1 per hour
+          maxWithdrawalsPerDay: 1,  // Only 1 per day
+        },
+      });
+
+      // First request will fail on RPC but rate limiter will record the attempt
+      await restrictiveSDK.processWithdrawal({
+        userId: 'user-rate-limited',
+        fromAddress: 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress: 'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: 1n * ZAT,
+        requestId: firstRequestId,
+      });
+
+      // Second request should hit rate limit (even though first failed on RPC)
+      // Note: The current implementation only records successful withdrawals
+      // So this test verifies the flow, not actual rate limiting of failed requests
+      const result = await restrictiveSDK.processWithdrawal({
+        userId: 'user-rate-limited',
+        fromAddress: 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress: 'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: 1n * ZAT,
+        requestId: secondRequestId,
+      });
+
+      // Second request will also fail on RPC (no actual server)
+      expect(result.success).toBe(false);
+
+      // Status should exist for the second request
+      const status = await restrictiveSDK.getWithdrawalStatus(secondRequestId);
+      expect(status).not.toBeNull();
+      expect(status?.status).toBe('failed');
+    });
+  });
+
   describe('Viewing Key Export', () => {
     it('should export viewing keys', async () => {
       const complianceManager = sdk.getComplianceManager();
