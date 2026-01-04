@@ -82,6 +82,7 @@ export type {
 // Utilities exports
 // =============================================================================
 export {
+  // Amount utilities
   ZATOSHIS_PER_ZEC,
   MAX_ZATOSHIS,
   MIN_ZATOSHIS,
@@ -94,6 +95,16 @@ export {
   parseAmountToZatoshis,
   addZatoshis,
   subtractZatoshis,
+  // Logger
+  LogLevel,
+  Logger,
+  createLogger,
+  defaultLogger,
+} from './utils/index.js';
+
+export type {
+  LogEntry,
+  LoggerConfig,
 } from './utils/index.js';
 
 // =============================================================================

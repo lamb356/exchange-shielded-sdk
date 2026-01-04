@@ -18,3 +18,15 @@ export {
   addZatoshis,
   subtractZatoshis,
 } from './amounts.js';
+
+export {
+  LogLevel,
+  Logger,
+  createLogger,
+  defaultLogger,
+} from './logger.js';
+
+export type {
+  LogEntry,
+  LoggerConfig,
+} from './logger.js';
