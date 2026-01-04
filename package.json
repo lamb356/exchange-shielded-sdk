@@ -83,12 +83,17 @@
   },
   "homepage": "https://github.com/example/exchange-shielded-sdk#readme",
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^8.51.0",
+    "@typescript-eslint/parser": "^8.51.0",
+    "eslint": "^9.39.2",
     "jest": "^29.7.0",
     "rimraf": "^5.0.5",
     "ts-jest": "^29.1.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.51.0"
   },
   "engines": {
     "node": ">=18.0.0"
