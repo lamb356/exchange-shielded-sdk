@@ -36,12 +36,12 @@ const sdk = createExchangeSDK({
   enableAuditLogging: true
 });
 
-// Process a withdrawal
+// Process a withdrawal (amounts in zatoshis: 10.5 ZEC = 1_050_000_000n)
 const result = await sdk.processWithdrawal({
   userId: 'user-123',
   fromAddress: 'zs1sourceaddress...',
   toAddress: 'zs1destinationaddress...',
-  amount: 10.5
+  amount: 1_050_000_000n  // 10.5 ZEC in zatoshis
 });
 
 if (result.success) {
@@ -248,27 +248,136 @@ const zec = zatoshisToZec(150000000n);  // Returns: 1.5
 validateZatoshis(amount);  // Throws if negative or exceeds 21M ZEC
 ```
 
-## Production Warnings
+## Production Deployment
 
-> **Important**: Review these items before deploying to production.
+> **WARNING**: The SDK ships with in-memory storage implementations that are NOT suitable for production use. Production deployments MUST provide persistent storage adapters.
 
-### Rate Limits are In-Memory Only
+### Storage Adapter Pattern
 
-Rate limits are stored in-memory and will be lost on restart. For production deployments with multiple instances or high availability requirements:
+The SDK uses pluggable storage adapters for production scalability:
 
 ```typescript
-// TODO: Implement Redis backing for rate limits
-// The WithdrawalRateLimiter class is designed for single-instance use.
-// For production, implement a custom rate limiter backed by Redis or similar.
+import {
+  createExchangeSDK,
+  IdempotencyStore,
+  WithdrawalStatusStore,
+} from 'exchange-shielded-sdk';
+
+// Example Redis implementation
+class RedisIdempotencyStore implements IdempotencyStore {
+  constructor(private redis: RedisClient) {}
+
+  async get(requestId: string) {
+    const data = await this.redis.get(`idempotency:${requestId}`);
+    if (!data) return null;
+    return JSON.parse(data, (key, value) => {
+      if (key === 'fee') return BigInt(value);
+      if (key === 'completedAt') return new Date(value);
+      return value;
+    });
+  }
+
+  async set(requestId: string, result: WithdrawalResult, ttlMs?: number) {
+    const serialized = JSON.stringify(result, (key, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    );
+    if (ttlMs) {
+      await this.redis.setex(`idempotency:${requestId}`, ttlMs / 1000, serialized);
+    } else {
+      await this.redis.set(`idempotency:${requestId}`, serialized);
+    }
+  }
+
+  async has(requestId: string) {
+    return (await this.redis.exists(`idempotency:${requestId}`)) === 1;
+  }
+
+  async delete(requestId: string) {
+    return (await this.redis.del(`idempotency:${requestId}`)) === 1;
+  }
+}
+
+// Use custom storage in SDK
+const sdk = createExchangeSDK({
+  rpc: { /* ... */ },
+  idempotencyStore: new RedisIdempotencyStore(redisClient),
+  withdrawalStatusStore: new RedisWithdrawalStatusStore(redisClient),
+});
 ```
 
-### getWithdrawalStatus() is a Stub
+### PostgreSQL Audit Sink Example
 
-The `getWithdrawalStatus()` method currently returns a basic status. For production, implement proper confirmation tracking:
+For compliance requirements, implement a persistent audit log:
 
 ```typescript
-// Current behavior: returns { status: 'unknown', ... }
-// Production: Implement transaction confirmation tracking via z_gettransaction
+import { AuditLogSink, AuditEvent, AuditFilter } from 'exchange-shielded-sdk';
+
+class PostgresAuditLogSink implements AuditLogSink {
+  constructor(private pool: Pool) {}
+
+  async append(event: AuditEvent) {
+    await this.pool.query(
+      `INSERT INTO audit_events (id, timestamp, event_type, severity, user_id,
+       transaction_id, amount, destination_address, metadata, previous_hash, hash)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [event.id, event.timestamp, event.eventType, event.severity, event.userId,
+       event.transactionId, event.amount, event.destinationAddress,
+       JSON.stringify(event.metadata), event.previousHash, event.hash]
+    );
+  }
+
+  async query(filter: AuditFilter) {
+    // Build SQL from filter criteria
+    let sql = 'SELECT * FROM audit_events WHERE 1=1';
+    const params: any[] = [];
+    // ... add filter conditions
+    const { rows } = await this.pool.query(sql, params);
+    return rows.map(this.rowToEvent);
+  }
+
+  async getLastHash() {
+    const { rows } = await this.pool.query(
+      'SELECT hash FROM audit_events ORDER BY timestamp DESC LIMIT 1'
+    );
+    return rows[0]?.hash ?? '0'.repeat(64);
+  }
+
+  async count() {
+    const { rows } = await this.pool.query('SELECT COUNT(*) FROM audit_events');
+    return parseInt(rows[0].count, 10);
+  }
+}
+```
+
+### Horizontal Scaling
+
+For high availability and horizontal scaling:
+
+1. **Stateless Workers**: SDK instances are stateless when using external storage
+2. **Shared Storage**: All workers connect to same Redis/PostgreSQL
+3. **Idempotency**: Request IDs prevent double-withdrawals across workers
+
+```
+                 +-------------+
+                 |   Load      |
+                 |  Balancer   |
+                 +------+------+
+                        |
+         +--------------+--------------+
+         |              |              |
+   +-----v----+   +-----v----+   +-----v----+
+   | Worker 1 |   | Worker 2 |   | Worker 3 |
+   | (SDK)    |   | (SDK)    |   | (SDK)    |
+   +-----+----+   +-----+----+   +-----+----+
+         |              |              |
+         +--------------+--------------+
+                        |
+              +---------+---------+
+              |                   |
+        +-----v-----+       +-----v-----+
+        |   Redis   |       | PostgreSQL|
+        | (cache)   |       | (audit)   |
+        +-----------+       +-----------+
 ```
 
 ### RPC Security
@@ -287,7 +396,7 @@ const sdk = createExchangeSDK({
       username: process.env.ZCASH_RPC_USER!,
       password: process.env.ZCASH_RPC_PASS!,
     },
-    tls: process.env.NODE_ENV === 'production', // Enable TLS in production
+    https: process.env.NODE_ENV === 'production',
   },
 });
 ```
