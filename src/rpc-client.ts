@@ -332,9 +332,9 @@ export class ZcashRpcClient {
    * Sends funds from a shielded address to multiple recipients
    *
    * @param from - Source address or 'ANY_TADDR'
-   * @param amounts - Array of recipient amounts
+   * @param amounts - Array of recipient amounts (amounts as ZEC strings)
    * @param minconf - Minimum confirmations (default: 10)
-   * @param fee - Fee in ZEC or null for ZIP 317 default
+   * @param fee - Fee in ZEC string or null for ZIP 317 default
    * @param privacyPolicy - Privacy policy (default: 'LegacyCompat')
    * @returns Operation ID to track the transaction
    *
@@ -342,7 +342,7 @@ export class ZcashRpcClient {
    * ```typescript
    * const opid = await client.z_sendmany(
    *   'zs1...',
-   *   [{ address: 'zs1...', amount: 1.5 }],
+   *   [{ address: 'zs1...', amount: '1.50000000' }],
    *   10,
    *   null,
    *   'FullPrivacy'
@@ -353,14 +353,21 @@ export class ZcashRpcClient {
     from: string,
     amounts: ZAmount[],
     minconf: number = 10,
-    fee: number | null = null,
+    fee: string | null = null,
     privacyPolicy: PrivacyPolicy = 'LegacyCompat'
   ): Promise<string> {
-    const params: unknown[] = [from, amounts, minconf];
+    // Convert string amounts to numbers for RPC (zcashd expects number in JSON)
+    const amountsForRpc = amounts.map(a => ({
+      address: a.address,
+      amount: parseFloat(a.amount),
+      ...(a.memo ? { memo: a.memo } : {}),
+    }));
+
+    const params: unknown[] = [from, amountsForRpc, minconf];
 
     // Only add optional params if they're specified
     if (fee !== null) {
-      params.push(fee);
+      params.push(parseFloat(fee));
       params.push(privacyPolicy);
     } else {
       // Need to pass null for fee to reach privacyPolicy
@@ -548,7 +555,7 @@ export class ZcashRpcClient {
    * Convenience method that combines z_sendmany with waitForOperation.
    *
    * @param from - Source address
-   * @param amounts - Array of recipient amounts
+   * @param amounts - Array of recipient amounts (amounts as ZEC strings)
    * @param options - Optional parameters
    * @returns The transaction ID
    */
@@ -557,7 +564,7 @@ export class ZcashRpcClient {
     amounts: ZAmount[],
     options?: {
       minconf?: number;
-      fee?: number | null;
+      fee?: string | null;
       privacyPolicy?: PrivacyPolicy;
       timeoutMs?: number;
     }

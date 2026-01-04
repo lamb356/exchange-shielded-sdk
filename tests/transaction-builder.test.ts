@@ -1,5 +1,7 @@
 /**
  * Tests for Shielded Transaction Builder Module
+ *
+ * All amounts are in zatoshis (1 ZEC = 100_000_000 zatoshis).
  */
 
 import {
@@ -17,6 +19,9 @@ import {
   FeeEstimateOptions,
 } from '../src/transaction-builder.js';
 import { setValidationOptions, resetValidationOptions } from '../src/address-validator.js';
+
+// Helper constant for zatoshis (1 ZEC = 100_000_000 zatoshis)
+const ZAT = 100_000_000n;
 
 // Use format-only validation for tests (fake addresses don't have valid checksums)
 beforeAll(() => {
@@ -200,7 +205,7 @@ describe('ShieldedTransactionBuilder', () => {
 
   describe('constructor', () => {
     it('should use default values when no options provided', () => {
-      const tx = builder.buildShieldedWithdrawal(validSaplingAddress, validTransparentAddress, 1.0);
+      const tx = builder.buildShieldedWithdrawal(validSaplingAddress, validTransparentAddress, 1n * ZAT);
       const request = builder.prepareZSendmany(tx);
 
       expect(request.minconf).toBe(10);
@@ -216,7 +221,7 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = customBuilder.buildShieldedWithdrawal(
         validSaplingAddress,
         validTransparentAddress,
-        1.0
+        1n * ZAT
       );
       const request = customBuilder.prepareZSendmany(tx);
 
@@ -230,12 +235,12 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validSaplingAddress,
         validTransparentAddress,
-        1.5
+        150_000_000n // 1.5 ZEC in zatoshis
       );
 
       expect(tx.from).toBe(validSaplingAddress);
       expect(tx.to).toBe(validTransparentAddress);
-      expect(tx.amount).toBe(1.5);
+      expect(tx.amount).toBe(150_000_000n);
       expect(tx.fromType).toBe('sapling');
       expect(tx.toType).toBe('transparent');
       expect(tx.createdAt).toBeLessThanOrEqual(Date.now());
@@ -247,7 +252,7 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validSaplingAddress,
         validSaplingAddress,
-        1.0,
+        1n * ZAT,
         memo
       );
 
@@ -256,11 +261,11 @@ describe('ShieldedTransactionBuilder', () => {
 
     it('should throw for invalid source address', () => {
       expect(() => {
-        builder.buildShieldedWithdrawal('invalid', validTransparentAddress, 1.0);
+        builder.buildShieldedWithdrawal('invalid', validTransparentAddress, 1n * ZAT);
       }).toThrow(TransactionBuilderError);
 
       try {
-        builder.buildShieldedWithdrawal('invalid', validTransparentAddress, 1.0);
+        builder.buildShieldedWithdrawal('invalid', validTransparentAddress, 1n * ZAT);
       } catch (error) {
         expect(error).toBeInstanceOf(TransactionBuilderError);
         expect((error as TransactionBuilderError).code).toBe('INVALID_FROM_ADDRESS');
@@ -269,11 +274,11 @@ describe('ShieldedTransactionBuilder', () => {
 
     it('should throw for non-shielded source address', () => {
       expect(() => {
-        builder.buildShieldedWithdrawal(validTransparentAddress, validSaplingAddress, 1.0);
+        builder.buildShieldedWithdrawal(validTransparentAddress, validSaplingAddress, 1n * ZAT);
       }).toThrow(TransactionBuilderError);
 
       try {
-        builder.buildShieldedWithdrawal(validTransparentAddress, validSaplingAddress, 1.0);
+        builder.buildShieldedWithdrawal(validTransparentAddress, validSaplingAddress, 1n * ZAT);
       } catch (error) {
         expect(error).toBeInstanceOf(TransactionBuilderError);
         expect((error as TransactionBuilderError).code).toBe('NOT_SHIELDED_SOURCE');
@@ -282,11 +287,11 @@ describe('ShieldedTransactionBuilder', () => {
 
     it('should throw for invalid destination address', () => {
       expect(() => {
-        builder.buildShieldedWithdrawal(validSaplingAddress, 'invalid', 1.0);
+        builder.buildShieldedWithdrawal(validSaplingAddress, 'invalid', 1n * ZAT);
       }).toThrow(TransactionBuilderError);
 
       try {
-        builder.buildShieldedWithdrawal(validSaplingAddress, 'invalid', 1.0);
+        builder.buildShieldedWithdrawal(validSaplingAddress, 'invalid', 1n * ZAT);
       } catch (error) {
         expect(error).toBeInstanceOf(TransactionBuilderError);
         expect((error as TransactionBuilderError).code).toBe('INVALID_TO_ADDRESS');
@@ -295,15 +300,11 @@ describe('ShieldedTransactionBuilder', () => {
 
     it('should throw for invalid amount', () => {
       expect(() => {
-        builder.buildShieldedWithdrawal(validSaplingAddress, validTransparentAddress, 0);
+        builder.buildShieldedWithdrawal(validSaplingAddress, validTransparentAddress, 0n);
       }).toThrow(TransactionBuilderError);
 
       expect(() => {
-        builder.buildShieldedWithdrawal(validSaplingAddress, validTransparentAddress, -1);
-      }).toThrow(TransactionBuilderError);
-
-      expect(() => {
-        builder.buildShieldedWithdrawal(validSaplingAddress, validTransparentAddress, NaN);
+        builder.buildShieldedWithdrawal(validSaplingAddress, validTransparentAddress, -1n);
       }).toThrow(TransactionBuilderError);
     });
 
@@ -312,7 +313,7 @@ describe('ShieldedTransactionBuilder', () => {
         builder.buildShieldedWithdrawal(
           validSaplingAddress,
           validTransparentAddress,
-          1.0,
+          1n * ZAT,
           '48656c6c6f'
         );
       }).toThrow(TransactionBuilderError);
@@ -321,7 +322,7 @@ describe('ShieldedTransactionBuilder', () => {
         builder.buildShieldedWithdrawal(
           validSaplingAddress,
           validTransparentAddress,
-          1.0,
+          1n * ZAT,
           '48656c6c6f'
         );
       } catch (error) {
@@ -334,13 +335,13 @@ describe('ShieldedTransactionBuilder', () => {
         builder.buildShieldedWithdrawal(
           validSaplingAddress,
           validSaplingAddress,
-          1.0,
+          1n * ZAT,
           'not-hex!'
         );
       }).toThrow(TransactionBuilderError);
 
       try {
-        builder.buildShieldedWithdrawal(validSaplingAddress, validSaplingAddress, 1.0, 'not-hex!');
+        builder.buildShieldedWithdrawal(validSaplingAddress, validSaplingAddress, 1n * ZAT, 'not-hex!');
       } catch (error) {
         expect((error as TransactionBuilderError).code).toBe('INVALID_MEMO_FORMAT');
       }
@@ -350,11 +351,11 @@ describe('ShieldedTransactionBuilder', () => {
       const longMemo = 'a'.repeat(1025); // 512.5 bytes in hex
 
       expect(() => {
-        builder.buildShieldedWithdrawal(validSaplingAddress, validSaplingAddress, 1.0, longMemo);
+        builder.buildShieldedWithdrawal(validSaplingAddress, validSaplingAddress, 1n * ZAT, longMemo);
       }).toThrow(TransactionBuilderError);
 
       try {
-        builder.buildShieldedWithdrawal(validSaplingAddress, validSaplingAddress, 1.0, longMemo);
+        builder.buildShieldedWithdrawal(validSaplingAddress, validSaplingAddress, 1n * ZAT, longMemo);
       } catch (error) {
         expect((error as TransactionBuilderError).code).toBe('MEMO_TOO_LONG');
       }
@@ -364,7 +365,7 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validUnifiedAddress,
         validTransparentAddress,
-        2.5
+        250_000_000n // 2.5 ZEC in zatoshis
       );
 
       expect(tx.fromType).toBe('unified');
@@ -375,7 +376,7 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validSproutAddress,
         validTransparentAddress,
-        0.5
+        50_000_000n // 0.5 ZEC in zatoshis
       );
 
       expect(tx.fromType).toBe('sprout');
@@ -387,47 +388,47 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validSaplingAddress,
         validTransparentAddress,
-        1.0
+        1n * ZAT
       );
 
       const fee = await builder.estimateFee(tx);
 
-      expect(fee).toBeGreaterThan(0);
-      expect(fee).toBeLessThan(1); // Fee should be much less than 1 ZEC
+      expect(fee).toBeGreaterThan(0n);
+      expect(fee).toBeLessThan(1n * ZAT); // Fee should be much less than 1 ZEC
     });
 
     it('should estimate fee for Unified to Sapling', async () => {
-      const tx = builder.buildShieldedWithdrawal(validUnifiedAddress, validSaplingAddress, 1.0);
+      const tx = builder.buildShieldedWithdrawal(validUnifiedAddress, validSaplingAddress, 1n * ZAT);
 
       const fee = await builder.estimateFee(tx);
 
-      expect(fee).toBeGreaterThan(0);
+      expect(fee).toBeGreaterThan(0n);
     });
 
     it('should include change output in estimation', async () => {
       const txWithChange = builder.buildShieldedWithdrawal(
         validSaplingAddress,
         validTransparentAddress,
-        0.5 // Not spending full balance
+        50_000_000n // 0.5 ZEC - Not spending full balance
       );
 
       const feeWithChange = await builder.estimateFee(txWithChange);
 
       // Fee should account for change output
-      expect(feeWithChange).toBeGreaterThanOrEqual(ZIP317.MINIMUM_FEE / ZIP317.ZATOSHIS_PER_ZEC);
+      expect(feeWithChange).toBeGreaterThanOrEqual(BigInt(ZIP317.MINIMUM_FEE));
     });
 
     it('should handle Sprout transactions with higher fees', async () => {
       const tx = builder.buildShieldedWithdrawal(
         validSproutAddress,
         validTransparentAddress,
-        1.0
+        1n * ZAT
       );
 
       const fee = await builder.estimateFee(tx);
 
       // Sprout uses JoinSplits which count as more actions
-      expect(fee).toBeGreaterThanOrEqual(ZIP317.MINIMUM_FEE / ZIP317.ZATOSHIS_PER_ZEC);
+      expect(fee).toBeGreaterThanOrEqual(BigInt(ZIP317.MINIMUM_FEE));
     });
   });
 
@@ -436,7 +437,7 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validSaplingAddress,
         validTransparentAddress,
-        1.5
+        150_000_000n // 1.5 ZEC in zatoshis
       );
 
       const request = builder.prepareZSendmany(tx);
@@ -444,7 +445,7 @@ describe('ShieldedTransactionBuilder', () => {
       expect(request.fromaddress).toBe(validSaplingAddress);
       expect(request.amounts).toHaveLength(1);
       expect(request.amounts[0].address).toBe(validTransparentAddress);
-      expect(request.amounts[0].amount).toBe(1.5);
+      expect(request.amounts[0].amount).toBe('1.50000000'); // ZEC string
       expect(request.amounts[0].memo).toBeUndefined();
       expect(request.minconf).toBe(10);
       expect(request.fee).toBeNull();
@@ -456,7 +457,7 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validSaplingAddress,
         validSaplingAddress,
-        1.0,
+        1n * ZAT,
         memo
       );
 
@@ -469,17 +470,17 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validSaplingAddress,
         validTransparentAddress,
-        1.0
+        1n * ZAT
       );
 
       const request = builder.prepareZSendmany(tx, {
         minconf: 1,
-        fee: 0.0001,
+        feeZatoshis: 10000n, // 0.0001 ZEC in zatoshis
         privacyPolicy: 'AllowRevealedAmounts',
       });
 
       expect(request.minconf).toBe(1);
-      expect(request.fee).toBe(0.0001);
+      expect(request.fee).toBe('0.00010000'); // ZEC string
       expect(request.privacyPolicy).toBe('AllowRevealedAmounts');
     });
 
@@ -487,13 +488,13 @@ describe('ShieldedTransactionBuilder', () => {
       const tx = builder.buildShieldedWithdrawal(
         validSaplingAddress,
         validTransparentAddress,
-        1.0
+        1n * ZAT
       );
-      tx.fee = 0.00015;
+      tx.fee = 15000n; // 0.00015 ZEC in zatoshis
 
       const request = builder.prepareZSendmany(tx);
 
-      expect(request.fee).toBe(0.00015);
+      expect(request.fee).toBe('0.00015000'); // ZEC string
     });
   });
 
@@ -502,7 +503,7 @@ describe('ShieldedTransactionBuilder', () => {
       const result = builder.validateTransaction(
         validSaplingAddress,
         validTransparentAddress,
-        1.0
+        1n * ZAT
       );
 
       expect(result.valid).toBe(true);
@@ -510,7 +511,7 @@ describe('ShieldedTransactionBuilder', () => {
     });
 
     it('should detect invalid source address', () => {
-      const result = builder.validateTransaction('invalid', validTransparentAddress, 1.0);
+      const result = builder.validateTransaction('invalid', validTransparentAddress, 1n * ZAT);
 
       expect(result.valid).toBe(false);
       expect(result.errors).toContain('Invalid source address');
@@ -520,7 +521,7 @@ describe('ShieldedTransactionBuilder', () => {
       const result = builder.validateTransaction(
         validTransparentAddress,
         validSaplingAddress,
-        1.0
+        1n * ZAT
       );
 
       expect(result.valid).toBe(false);
@@ -528,21 +529,21 @@ describe('ShieldedTransactionBuilder', () => {
     });
 
     it('should detect invalid destination address', () => {
-      const result = builder.validateTransaction(validSaplingAddress, 'invalid', 1.0);
+      const result = builder.validateTransaction(validSaplingAddress, 'invalid', 1n * ZAT);
 
       expect(result.valid).toBe(false);
       expect(result.errors).toContain('Invalid destination address');
     });
 
     it('should detect invalid amount', () => {
-      const result = builder.validateTransaction(validSaplingAddress, validTransparentAddress, 0);
+      const result = builder.validateTransaction(validSaplingAddress, validTransparentAddress, 0n);
 
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain('Amount must be a positive number');
+      expect(result.errors).toContain('Amount must be a positive bigint (zatoshis)');
     });
 
     it('should collect multiple errors', () => {
-      const result = builder.validateTransaction('invalid', 'also-invalid', -1);
+      const result = builder.validateTransaction('invalid', 'also-invalid', -1n);
 
       expect(result.valid).toBe(false);
       expect(result.errors.length).toBeGreaterThanOrEqual(2);
@@ -592,32 +593,32 @@ describe('Additional fee estimation edge cases', () => {
   });
 
   it('should estimate fee for Unified to Unified (Orchard to Orchard)', async () => {
-    const tx = builder.buildShieldedWithdrawal(validUnifiedAddress, validUnifiedAddress, 1.0);
+    const tx = builder.buildShieldedWithdrawal(validUnifiedAddress, validUnifiedAddress, 1n * ZAT);
     const fee = await builder.estimateFee(tx);
-    expect(fee).toBeGreaterThan(0);
+    expect(fee).toBeGreaterThan(0n);
   });
 
   it('should estimate fee for Sapling to Sapling', async () => {
-    const tx = builder.buildShieldedWithdrawal(validSaplingAddress, validSaplingAddress, 1.0);
+    const tx = builder.buildShieldedWithdrawal(validSaplingAddress, validSaplingAddress, 1n * ZAT);
     const fee = await builder.estimateFee(tx);
-    expect(fee).toBeGreaterThan(0);
+    expect(fee).toBeGreaterThan(0n);
   });
 
   it('should estimate fee for Sprout to Sprout', async () => {
-    const tx = builder.buildShieldedWithdrawal(validSproutAddress, validSproutAddress, 1.0);
+    const tx = builder.buildShieldedWithdrawal(validSproutAddress, validSproutAddress, 1n * ZAT);
     const fee = await builder.estimateFee(tx);
-    expect(fee).toBeGreaterThan(0);
+    expect(fee).toBeGreaterThan(0n);
   });
 
   it('should estimate fee for Unified to Sapling', async () => {
-    const tx = builder.buildShieldedWithdrawal(validUnifiedAddress, validSaplingAddress, 1.0);
+    const tx = builder.buildShieldedWithdrawal(validUnifiedAddress, validSaplingAddress, 1n * ZAT);
     const fee = await builder.estimateFee(tx);
-    expect(fee).toBeGreaterThan(0);
+    expect(fee).toBeGreaterThan(0n);
   });
 
   it('should estimate fee for Sprout to Unified', async () => {
-    const tx = builder.buildShieldedWithdrawal(validSproutAddress, validUnifiedAddress, 1.0);
+    const tx = builder.buildShieldedWithdrawal(validSproutAddress, validUnifiedAddress, 1n * ZAT);
     const fee = await builder.estimateFee(tx);
-    expect(fee).toBeGreaterThan(0);
+    expect(fee).toBeGreaterThan(0n);
   });
 });

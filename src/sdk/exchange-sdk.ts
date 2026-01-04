@@ -41,7 +41,7 @@ import {
   VelocityCheckResult,
 } from '../compliance/compliance.js';
 import { isShielded } from '../address-validator.js';
-import { zatoshisToZec, validatePositiveZatoshis, ZATOSHIS_PER_ZEC } from '../utils/amounts.js';
+import { zatoshisToZec, validatePositiveZatoshis } from '../utils/amounts.js';
 import { Logger, LogLevel } from '../utils/logger.js';
 import {
   IdempotencyStore,
@@ -481,11 +481,11 @@ export class ExchangeShieldedSDK {
         });
       }
 
-      // Build the transaction (transaction builder uses ZEC internally)
+      // Build the transaction - pass zatoshis directly (bigint)
       const pendingTx = this.txBuilder.buildShieldedWithdrawal(
         fromResult.address,
         toResult.address,
-        amountZec,
+        request.amount, // Pass zatoshis (bigint) directly
         memo
       );
 
@@ -532,9 +532,9 @@ export class ExchangeShieldedSDK {
           });
         }
 
-        // Convert fee from ZEC to zatoshis for the result
-        const feeZatoshis = zsendmanyRequest.fee !== undefined && zsendmanyRequest.fee !== null
-          ? BigInt(Math.round(zsendmanyRequest.fee * 100_000_000))
+        // Convert fee from ZEC string to zatoshis for the result
+        const feeZatoshis = zsendmanyRequest.fee !== null
+          ? BigInt(Math.round(parseFloat(zsendmanyRequest.fee) * 100_000_000))
           : undefined;
 
         const completedAt = new Date();
@@ -703,9 +703,6 @@ export class ExchangeShieldedSDK {
     // Validate amount
     validatePositiveZatoshis(amountZatoshis);
 
-    // Convert to ZEC for internal processing
-    const amountZec = zatoshisToZec(amountZatoshis);
-
     // Build a dummy transaction for estimation
     // Using a placeholder source address
     const placeholderSource = 'zs1placeholder' + '0'.repeat(60);
@@ -714,14 +711,14 @@ export class ExchangeShieldedSDK {
       const pendingTx: PendingTransaction = {
         from: placeholderSource,
         to: destResult.address,
-        amount: amountZec,
+        amount: amountZatoshis, // Now uses zatoshis directly (bigint)
         createdAt: Date.now(),
         fromType: 'sapling',
         toType: destResult.type,
       };
 
-      const feeZec = await this.txBuilder.estimateFee(pendingTx);
-      const feeZatoshis = BigInt(Math.round(feeZec * 100_000_000));
+      // estimateFee now returns bigint (zatoshis)
+      const feeZatoshis = await this.txBuilder.estimateFee(pendingTx);
 
       return {
         feeZatoshis,

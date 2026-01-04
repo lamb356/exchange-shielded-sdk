@@ -66,12 +66,12 @@ export interface PendingTransaction {
   from: string;
   /** Destination address */
   to: string;
-  /** Amount in ZEC (not zatoshis) */
-  amount: number;
+  /** Amount in zatoshis (1 ZEC = 100_000_000 zatoshis) */
+  amount: bigint;
   /** Optional memo (for shielded recipients only) */
   memo?: string;
-  /** Estimated fee in ZEC (calculated if not provided) */
-  fee?: number;
+  /** Estimated fee in zatoshis (calculated if not provided) */
+  fee?: bigint;
   /** Timestamp when the transaction was created */
   createdAt: number;
   /** Source address type */
@@ -102,8 +102,8 @@ export interface UnsignedTransaction {
 export interface ZAmount {
   /** Destination address */
   address: string;
-  /** Amount in ZEC */
-  amount: number;
+  /** Amount in ZEC (string format for JSON precision) */
+  amount: string;
   /** Optional hex-encoded memo (512 bytes max) */
   memo?: string;
 }
@@ -132,8 +132,8 @@ export interface ZSendmanyRequest {
   amounts: ZAmount[];
   /** Minimum confirmations required for inputs */
   minconf: number;
-  /** Fee in ZEC (null for ZIP 317 default) */
-  fee: number | null;
+  /** Fee in ZEC string (null for ZIP 317 default) */
+  fee: string | null;
   /** Privacy policy */
   privacyPolicy: PrivacyPolicy;
 }
@@ -326,7 +326,7 @@ export class ShieldedTransactionBuilder {
    *
    * @param from - Source address (must be shielded: zs, zc, or u1)
    * @param to - Destination address (any valid Zcash address)
-   * @param amount - Amount in ZEC to withdraw
+   * @param amountZatoshis - Amount in zatoshis to withdraw (1 ZEC = 100_000_000 zatoshis)
    * @param memo - Optional memo (hex-encoded, for shielded recipients only)
    * @returns A pending transaction ready for fee estimation and submission
    * @throws TransactionBuilderError if addresses are invalid
@@ -334,7 +334,7 @@ export class ShieldedTransactionBuilder {
   buildShieldedWithdrawal(
     from: string,
     to: string,
-    amount: number,
+    amountZatoshis: bigint,
     memo?: string
   ): PendingTransaction {
     // Validate source address
@@ -361,9 +361,9 @@ export class ShieldedTransactionBuilder {
     }
 
     // Validate amount
-    if (typeof amount !== 'number' || isNaN(amount) || amount <= 0) {
+    if (typeof amountZatoshis !== 'bigint' || amountZatoshis <= 0n) {
       throw new TransactionBuilderError(
-        'Amount must be a positive number',
+        'Amount must be a positive bigint (zatoshis)',
         'INVALID_AMOUNT'
       );
     }
@@ -395,7 +395,7 @@ export class ShieldedTransactionBuilder {
     return {
       from,
       to,
-      amount,
+      amount: amountZatoshis,
       memo,
       createdAt: Date.now(),
       fromType,
@@ -415,9 +415,9 @@ export class ShieldedTransactionBuilder {
    * to let zcashd calculate the proper ZIP 317 fee.
    *
    * @param transaction - The pending transaction
-   * @returns Promise resolving to estimated fee in ZEC
+   * @returns Promise resolving to estimated fee in zatoshis
    */
-  async estimateFee(transaction: PendingTransaction): Promise<number> {
+  async estimateFee(transaction: PendingTransaction): Promise<bigint> {
     const options: FeeEstimateOptions = {
       transparentInputs: 0,
       transparentOutputs: 0,
@@ -459,30 +459,35 @@ export class ShieldedTransactionBuilder {
     }
 
     const estimate = estimateTransactionFee(options);
-    return estimate.zec;
+    return BigInt(estimate.zatoshis);
   }
 
   /**
    * Prepares a z_sendmany RPC request from a pending transaction
    *
-   * @param tx - The pending transaction
+   * Converts zatoshis to ZEC string format at the RPC boundary.
+   *
+   * @param tx - The pending transaction (amounts in zatoshis)
    * @param options - Optional overrides
    * @param options.minconf - Minimum confirmations (default: builder default)
-   * @param options.fee - Fee in ZEC (null for ZIP 317 default)
+   * @param options.feeZatoshis - Fee in zatoshis (null for ZIP 317 default)
    * @param options.privacyPolicy - Privacy policy (default: builder default)
-   * @returns A ZSendmanyRequest ready for RPC submission
+   * @returns A ZSendmanyRequest ready for RPC submission (amounts as ZEC strings)
    */
   prepareZSendmany(
     tx: PendingTransaction,
     options?: {
       minconf?: number;
-      fee?: number | null;
+      feeZatoshis?: bigint | null;
       privacyPolicy?: PrivacyPolicy;
     }
   ): ZSendmanyRequest {
+    // Convert zatoshis to ZEC string at the RPC boundary
+    const amountZecString = (Number(tx.amount) / 100_000_000).toFixed(8);
+
     const amount: ZAmount = {
       address: tx.to,
-      amount: tx.amount,
+      amount: amountZecString,
     };
 
     // Only include memo for shielded recipients
@@ -490,11 +495,17 @@ export class ShieldedTransactionBuilder {
       amount.memo = tx.memo;
     }
 
+    // Determine fee: use provided option, then tx.fee, then null for ZIP 317 default
+    const feeZatoshis = options?.feeZatoshis ?? tx.fee ?? null;
+    const feeZecString = feeZatoshis !== null
+      ? (Number(feeZatoshis) / 100_000_000).toFixed(8)
+      : null;
+
     return {
       fromaddress: tx.from,
       amounts: [amount],
       minconf: options?.minconf ?? this.defaultMinconf,
-      fee: options?.fee ?? tx.fee ?? null,
+      fee: feeZecString,
       privacyPolicy: options?.privacyPolicy ?? this.defaultPrivacyPolicy,
     };
   }
@@ -504,13 +515,13 @@ export class ShieldedTransactionBuilder {
    *
    * @param from - Source address
    * @param to - Destination address
-   * @param amount - Amount in ZEC
+   * @param amountZatoshis - Amount in zatoshis
    * @returns Object with validation result and any error messages
    */
   validateTransaction(
     from: string,
     to: string,
-    amount: number
+    amountZatoshis: bigint
   ): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
 
@@ -526,8 +537,8 @@ export class ShieldedTransactionBuilder {
       errors.push('Invalid destination address');
     }
 
-    if (typeof amount !== 'number' || isNaN(amount) || amount <= 0) {
-      errors.push('Amount must be a positive number');
+    if (typeof amountZatoshis !== 'bigint' || amountZatoshis <= 0n) {
+      errors.push('Amount must be a positive bigint (zatoshis)');
     }
 
     return {
