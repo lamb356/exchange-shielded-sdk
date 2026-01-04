@@ -11,6 +11,7 @@ import {
   createConservativeRateLimiter,
   createHighVolumeRateLimiter,
 } from '../src/security/rate-limiter.js';
+import { MemoryRateLimitStore } from '../src/storage/index.js';
 
 // Helper constants for zatoshis (1 ZEC = 100_000_000 zatoshis)
 const ZAT = 100_000_000n;
@@ -356,6 +357,179 @@ describe('WithdrawalRateLimiter', () => {
       expect(config.maxWithdrawalsPerHour).toBe(100);
       expect(config.maxWithdrawalsPerDay).toBe(500);
       expect(config.cooldownMs).toBe(10000); // 10 seconds
+    });
+  });
+});
+
+describe('WithdrawalRateLimiter with external store', () => {
+  let limiter: WithdrawalRateLimiter;
+  let store: MemoryRateLimitStore;
+  let currentTime: number;
+
+  // Helper to create a limiter with controlled time and external store
+  const createTestLimiter = (): WithdrawalRateLimiter => {
+    currentTime = Date.now();
+    store = new MemoryRateLimitStore();
+    return new WithdrawalRateLimiter(
+      {
+        maxWithdrawalsPerHour: 5,
+        maxWithdrawalsPerDay: 20,
+        maxAmountPerWithdrawal: 100n * ZAT,
+        maxTotalAmountPerDay: 500n * ZAT,
+        cooldownMs: 60000,
+        store,
+      },
+      () => currentTime
+    );
+  };
+
+  // Helper to advance time
+  const advanceTime = (ms: number): void => {
+    currentTime += ms;
+  };
+
+  beforeEach(() => {
+    limiter = createTestLimiter();
+  });
+
+  describe('hasExternalStore', () => {
+    it('should return true when store is configured', () => {
+      expect(limiter.hasExternalStore()).toBe(true);
+    });
+
+    it('should return false when no store is configured', () => {
+      const noStoreLimiter = new WithdrawalRateLimiter();
+      expect(noStoreLimiter.hasExternalStore()).toBe(false);
+    });
+  });
+
+  describe('checkLimitAsync', () => {
+    it('should allow first withdrawal', async () => {
+      const result = await limiter.checkLimitAsync('user-1', 10n * ZAT);
+      expect(result.allowed).toBe(true);
+    });
+
+    it('should enforce limits using external store', async () => {
+      // Record 5 withdrawals through the async API
+      for (let i = 0; i < 5; i++) {
+        await limiter.recordWithdrawalAsync('user-1', 10n * ZAT);
+        advanceTime(61000); // Skip cooldown
+      }
+
+      // 6th should be denied (hourly limit)
+      const result = await limiter.checkLimitAsync('user-1', 10n * ZAT);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Hourly');
+    });
+
+    it('should enforce cooldown using external store', async () => {
+      await limiter.recordWithdrawalAsync('user-1', 10n * ZAT);
+
+      // Try immediately
+      const result = await limiter.checkLimitAsync('user-1', 10n * ZAT);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Cooldown');
+    });
+
+    it('should enforce daily amount limit using external store', async () => {
+      // Record a large withdrawal
+      await limiter.recordWithdrawalAsync('user-1', 450n * ZAT);
+      advanceTime(61000);
+
+      // Try to exceed daily limit
+      const result = await limiter.checkLimitAsync('user-1', 100n * ZAT);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Daily amount');
+    });
+  });
+
+  describe('recordWithdrawalAsync', () => {
+    it('should persist withdrawal to external store', async () => {
+      await limiter.recordWithdrawalAsync('user-1', 25n * ZAT);
+
+      // Verify data is in the store
+      const data = await store.getUserLimits('user-1');
+      expect(data).not.toBeNull();
+      expect(data?.withdrawalsToday).toBe(1);
+      expect(data?.amountToday).toBe(25n * ZAT);
+    });
+
+    it('should increment counts correctly', async () => {
+      await limiter.recordWithdrawalAsync('user-1', 10n * ZAT);
+      advanceTime(61000);
+      await limiter.recordWithdrawalAsync('user-1', 20n * ZAT);
+
+      const data = await store.getUserLimits('user-1');
+      expect(data?.withdrawalsToday).toBe(2);
+      expect(data?.amountToday).toBe(30n * ZAT);
+    });
+
+    it('should reset hourly count on new hour', async () => {
+      await limiter.recordWithdrawalAsync('user-1', 10n * ZAT);
+
+      // Advance past one hour
+      advanceTime(61 * 60 * 1000);
+
+      await limiter.recordWithdrawalAsync('user-1', 20n * ZAT);
+
+      const data = await store.getUserLimits('user-1');
+      expect(data?.withdrawalsThisHour).toBe(1); // Reset to 1 for new hour
+      expect(data?.withdrawalsToday).toBe(2); // Still counting daily
+    });
+  });
+
+  describe('getRemainingLimitAsync', () => {
+    it('should return full limits for new user', async () => {
+      const remaining = await limiter.getRemainingLimitAsync('new-user');
+
+      expect(remaining.withdrawalsRemainingHour).toBe(5);
+      expect(remaining.withdrawalsRemainingDay).toBe(20);
+      expect(remaining.amountRemainingToday).toBe(500n * ZAT);
+    });
+
+    it('should reflect consumed limits from store', async () => {
+      await limiter.recordWithdrawalAsync('user-1', 100n * ZAT);
+      advanceTime(61000);
+      await limiter.recordWithdrawalAsync('user-1', 100n * ZAT);
+
+      const remaining = await limiter.getRemainingLimitAsync('user-1');
+
+      expect(remaining.withdrawalsRemainingHour).toBe(3);
+      expect(remaining.withdrawalsRemainingDay).toBe(18);
+      expect(remaining.amountRemainingToday).toBe(300n * ZAT);
+    });
+  });
+
+  describe('resetUserAsync', () => {
+    it('should reset user limits in external store', async () => {
+      await limiter.recordWithdrawalAsync('user-1', 100n * ZAT);
+
+      await limiter.resetUserAsync('user-1');
+
+      const data = await store.getUserLimits('user-1');
+      expect(data).toBeNull();
+
+      // Verify limits are reset
+      const remaining = await limiter.getRemainingLimitAsync('user-1');
+      expect(remaining.amountRemainingToday).toBe(500n * ZAT);
+    });
+  });
+
+  describe('fallback behavior', () => {
+    it('should fallback to sync methods when no store', async () => {
+      const noStoreLimiter = new WithdrawalRateLimiter({
+        maxWithdrawalsPerHour: 5,
+        cooldownMs: 0,
+      });
+
+      // These async methods should work by falling back to sync
+      const result = await noStoreLimiter.checkLimitAsync('user-1', 10n * ZAT);
+      expect(result.allowed).toBe(true);
+
+      await noStoreLimiter.recordWithdrawalAsync('user-1', 10n * ZAT);
+
+      const remaining = await noStoreLimiter.getRemainingLimitAsync('user-1');
+      expect(remaining.withdrawalsRemainingHour).toBe(4);
     });
   });
 });

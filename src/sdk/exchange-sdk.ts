@@ -46,6 +46,7 @@ import { Logger, LogLevel } from '../utils/logger.js';
 import {
   IdempotencyStore,
   WithdrawalStatusStore,
+  RateLimitStore,
   MemoryIdempotencyStore,
   MemoryWithdrawalStatusStore,
 } from '../storage/index.js';
@@ -82,6 +83,11 @@ export interface SDKConfig {
    * If not provided, uses in-memory storage (not suitable for production)
    */
   withdrawalStatusStore?: WithdrawalStatusStore;
+  /**
+   * Custom rate limit store for distributed rate limiting
+   * If not provided, uses in-memory storage (not suitable for distributed deployments)
+   */
+  rateLimitStore?: RateLimitStore;
 }
 
 /**
@@ -272,7 +278,11 @@ export class ExchangeShieldedSDK {
 
     // Initialize security components
     this.keyManager = new SecureKeyManager(config.keyManager);
-    this.rateLimiter = new WithdrawalRateLimiter(config.rateLimiter);
+    // Pass the rate limit store to the rate limiter if provided
+    this.rateLimiter = new WithdrawalRateLimiter({
+      ...config.rateLimiter,
+      store: config.rateLimitStore,
+    });
 
     // Initialize compliance components
     this.auditLogger = new AuditLogger({

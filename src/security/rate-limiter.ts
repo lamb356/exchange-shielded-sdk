@@ -10,7 +10,8 @@
  * @packageDocumentation
  */
 
-import { zatoshisToZec, zecToZatoshis } from '../utils/amounts.js';
+import { zatoshisToZec } from '../utils/amounts.js';
+import { RateLimitStore, UserLimitData } from '../storage/interfaces.js';
 
 /**
  * Rate limit configuration
@@ -30,6 +31,12 @@ export interface RateLimitConfig {
   cooldownMs: number;
   /** Whether to enable sliding window rate limiting */
   useSlidingWindow?: boolean;
+  /**
+   * Optional pluggable store for distributed rate limiting.
+   * If provided, rate limit state is stored externally (e.g., Redis).
+   * If not provided, uses in-memory storage (not suitable for distributed deployments).
+   */
+  store?: RateLimitStore;
 }
 
 /**
@@ -156,8 +163,11 @@ export class WithdrawalRateLimiter {
   /** Rate limit configuration */
   private readonly config: RateLimitConfig;
 
-  /** Per-user rate limit state */
+  /** Per-user rate limit state (used when no external store is provided) */
   private readonly userStates: Map<string, UserRateLimitState>;
+
+  /** External store for distributed deployments */
+  private readonly store?: RateLimitStore;
 
   /** Function to get current timestamp (for testing) */
   private readonly getNow: () => number;
@@ -165,16 +175,24 @@ export class WithdrawalRateLimiter {
   /**
    * Creates a new WithdrawalRateLimiter
    *
-   * @param config - Rate limit configuration
+   * @param config - Rate limit configuration (including optional store)
    * @param getNow - Optional function to get current time (for testing)
    */
   constructor(config: Partial<RateLimitConfig> = {}, getNow?: () => number) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.userStates = new Map();
+    this.store = config.store;
     this.getNow = getNow ?? (() => Date.now());
 
     // Validate configuration
     this.validateConfig();
+  }
+
+  /**
+   * Returns whether this limiter uses an external store
+   */
+  hasExternalStore(): boolean {
+    return this.store !== undefined;
   }
 
   /**
@@ -199,7 +217,7 @@ export class WithdrawalRateLimiter {
   }
 
   /**
-   * Checks if a withdrawal is allowed for a user
+   * Checks if a withdrawal is allowed for a user (sync version for in-memory store)
    *
    * @param userId - The user identifier
    * @param amountZatoshis - The withdrawal amount in zatoshis
@@ -215,9 +233,46 @@ export class WithdrawalRateLimiter {
     // Calculate current usage
     const usage = this.calculateUsage(state, now);
 
+    return this.evaluateLimits(userId, amountZatoshis, usage, state.lastWithdrawalAt, now);
+  }
+
+  /**
+   * Checks if a withdrawal is allowed for a user (async version for external store)
+   *
+   * Use this method when using an external store for distributed rate limiting.
+   *
+   * @param userId - The user identifier
+   * @param amountZatoshis - The withdrawal amount in zatoshis
+   * @returns Promise resolving to rate limit check result
+   */
+  async checkLimitAsync(userId: string, amountZatoshis: bigint): Promise<RateLimitResult> {
+    const now = this.getNow();
+
+    if (this.store) {
+      // Use external store
+      const limitData = await this.store.getUserLimits(userId);
+      const usage = this.calculateUsageFromStore(limitData, now);
+      const lastWithdrawalAt = limitData?.lastWithdrawalTime;
+      return this.evaluateLimits(userId, amountZatoshis, usage, lastWithdrawalAt, now);
+    } else {
+      // Fall back to sync version
+      return this.checkLimit(userId, amountZatoshis);
+    }
+  }
+
+  /**
+   * Evaluates rate limits against current usage
+   */
+  private evaluateLimits(
+    userId: string,
+    amountZatoshis: bigint,
+    usage: RateLimitUsage,
+    lastWithdrawalAt: number | undefined,
+    now: number
+  ): RateLimitResult {
     // Check cooldown
-    if (state.lastWithdrawalAt !== undefined) {
-      const timeSinceLastWithdrawal = now - state.lastWithdrawalAt;
+    if (lastWithdrawalAt !== undefined) {
+      const timeSinceLastWithdrawal = now - lastWithdrawalAt;
       if (timeSinceLastWithdrawal < this.config.cooldownMs) {
         const retryAfterMs = this.config.cooldownMs - timeSinceLastWithdrawal;
         return {
@@ -278,7 +333,7 @@ export class WithdrawalRateLimiter {
   }
 
   /**
-   * Records a successful withdrawal
+   * Records a successful withdrawal (sync version for in-memory store)
    *
    * @param userId - The user identifier
    * @param amountZatoshis - The withdrawal amount in zatoshis
@@ -300,7 +355,104 @@ export class WithdrawalRateLimiter {
   }
 
   /**
-   * Gets the remaining limits for a user
+   * Records a successful withdrawal (async version for external store)
+   *
+   * Use this method when using an external store for distributed rate limiting.
+   *
+   * @param userId - The user identifier
+   * @param amountZatoshis - The withdrawal amount in zatoshis
+   */
+  async recordWithdrawalAsync(userId: string, amountZatoshis: bigint): Promise<void> {
+    const now = this.getNow();
+
+    if (this.store) {
+      // Get current state from store
+      let limitData = await this.store.getUserLimits(userId);
+
+      // Update window starts if needed
+      const hourStart = this.getHourStart(now);
+      const dayStart = this.getDayStart(now);
+
+      if (!limitData) {
+        // Create new user data
+        limitData = {
+          userId,
+          withdrawalsThisHour: 1,
+          withdrawalsToday: 1,
+          amountToday: amountZatoshis,
+          lastWithdrawalTime: now,
+          hourlyWindowStart: hourStart,
+          dailyWindowStart: dayStart,
+        };
+      } else {
+        // Update existing data
+        // Reset hourly count if in a new hour
+        if (limitData.hourlyWindowStart < hourStart) {
+          limitData.withdrawalsThisHour = 1;
+          limitData.hourlyWindowStart = hourStart;
+        } else {
+          limitData.withdrawalsThisHour++;
+        }
+
+        // Reset daily count if in a new day
+        if (limitData.dailyWindowStart < dayStart) {
+          limitData.withdrawalsToday = 1;
+          limitData.amountToday = amountZatoshis;
+          limitData.dailyWindowStart = dayStart;
+        } else {
+          limitData.withdrawalsToday++;
+          limitData.amountToday += amountZatoshis;
+        }
+
+        limitData.lastWithdrawalTime = now;
+      }
+
+      await this.store.setUserLimits(userId, limitData);
+    } else {
+      // Fall back to sync version
+      this.recordWithdrawal(userId, amountZatoshis);
+    }
+  }
+
+  /**
+   * Calculates usage from store data
+   */
+  private calculateUsageFromStore(limitData: UserLimitData | null, now: number): RateLimitUsage {
+    if (!limitData) {
+      return {
+        withdrawalsThisHour: 0,
+        withdrawalsThisDay: 0,
+        totalAmountToday: 0n,
+      };
+    }
+
+    const hourStart = this.getHourStart(now);
+    const dayStart = this.getDayStart(now);
+
+    // Reset counts if windows have expired
+    let withdrawalsThisHour = limitData.withdrawalsThisHour;
+    let withdrawalsThisDay = limitData.withdrawalsToday;
+    let totalAmountToday = limitData.amountToday;
+
+    if (limitData.hourlyWindowStart < hourStart) {
+      withdrawalsThisHour = 0;
+    }
+
+    if (limitData.dailyWindowStart < dayStart) {
+      withdrawalsThisDay = 0;
+      totalAmountToday = 0n;
+    }
+
+    return {
+      withdrawalsThisHour,
+      withdrawalsThisDay,
+      totalAmountToday,
+      lastWithdrawalAt: limitData.lastWithdrawalTime,
+    };
+  }
+
+  /**
+   * Gets the remaining limits for a user (sync version for in-memory store)
    *
    * @param userId - The user identifier
    * @returns Remaining limit information
@@ -315,10 +467,41 @@ export class WithdrawalRateLimiter {
     // Calculate current usage
     const usage = this.calculateUsage(state, now);
 
+    return this.calculateRemainingLimit(usage, state.lastWithdrawalAt, now);
+  }
+
+  /**
+   * Gets the remaining limits for a user (async version for external store)
+   *
+   * Use this method when using an external store for distributed rate limiting.
+   *
+   * @param userId - The user identifier
+   * @returns Promise resolving to remaining limit information
+   */
+  async getRemainingLimitAsync(userId: string): Promise<RemainingLimit> {
+    const now = this.getNow();
+
+    if (this.store) {
+      const limitData = await this.store.getUserLimits(userId);
+      const usage = this.calculateUsageFromStore(limitData, now);
+      return this.calculateRemainingLimit(usage, limitData?.lastWithdrawalTime, now);
+    } else {
+      return this.getRemainingLimit(userId);
+    }
+  }
+
+  /**
+   * Calculates remaining limits from usage data
+   */
+  private calculateRemainingLimit(
+    usage: RateLimitUsage,
+    lastWithdrawalAt: number | undefined,
+    now: number
+  ): RemainingLimit {
     // Calculate cooldown remaining
     let cooldownRemainingMs = 0;
-    if (state.lastWithdrawalAt !== undefined) {
-      const timeSinceLastWithdrawal = now - state.lastWithdrawalAt;
+    if (lastWithdrawalAt !== undefined) {
+      const timeSinceLastWithdrawal = now - lastWithdrawalAt;
       if (timeSinceLastWithdrawal < this.config.cooldownMs) {
         cooldownRemainingMs = this.config.cooldownMs - timeSinceLastWithdrawal;
       }
@@ -351,7 +534,7 @@ export class WithdrawalRateLimiter {
   }
 
   /**
-   * Resets the rate limit state for a user
+   * Resets the rate limit state for a user (sync version for in-memory store)
    *
    * @param userId - The user identifier
    */
@@ -360,7 +543,25 @@ export class WithdrawalRateLimiter {
   }
 
   /**
-   * Resets all rate limit state
+   * Resets the rate limit state for a user (async version for external store)
+   *
+   * Use this method when using an external store for distributed rate limiting.
+   *
+   * @param userId - The user identifier
+   */
+  async resetUserAsync(userId: string): Promise<void> {
+    if (this.store) {
+      await this.store.reset(userId);
+    } else {
+      this.resetUser(userId);
+    }
+  }
+
+  /**
+   * Resets all rate limit state (in-memory only)
+   *
+   * Note: This only clears the in-memory state. For external stores,
+   * you need to clear the store directly.
    */
   resetAll(): void {
     this.userStates.clear();
