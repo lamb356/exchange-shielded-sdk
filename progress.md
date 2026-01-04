@@ -1,6 +1,117 @@
 # Exchange Shielded Withdrawal SDK - Progress
 
-## Milestone 2: Transaction Building
+## Milestone 3: Security & Integration
+
+### Status: COMPLETED
+
+## Test Results
+- **314 tests passing**
+- **Coverage:** 92.2% statements, 82.91% branches, 96.79% functions
+
+## Checklist
+
+### Phase 1: Security Layer (src/security/)
+- [x] Create SecureKeyManager class (key-manager.ts)
+  - [x] Keys held in memory only, never serialized to logs
+  - [x] loadKey method with encryption/password
+  - [x] signTransaction method
+  - [x] clearKey and clearAllKeys methods
+  - [x] Ensure keys never appear in logs, errors, or stack traces
+- [x] Create input sanitization functions (sanitizer.ts)
+  - [x] sanitizeAddress function
+  - [x] sanitizeAmount function
+  - [x] sanitizeMemo function
+  - [x] redactSensitiveData function for safe logging
+- [x] Create WithdrawalRateLimiter class (rate-limiter.ts)
+  - [x] Configurable rate limit config
+  - [x] checkLimit method
+  - [x] recordWithdrawal method
+  - [x] getRemainingLimit method
+  - [x] Max withdrawals per hour/day
+  - [x] Max amount per withdrawal
+  - [x] Max total amount per day
+  - [x] Cooldown between withdrawals
+
+### Phase 2: Compliance (src/compliance/)
+- [x] Create AuditLogger class (audit-logger.ts)
+  - [x] AuditEventType enum
+  - [x] AuditEvent interface
+  - [x] log method
+  - [x] getEvents method with filtering
+  - [x] exportForCompliance method
+  - [x] Tamper-evident logging (hash chain)
+- [x] Create ComplianceManager class (compliance.ts)
+  - [x] exportViewingKey method
+  - [x] checkVelocity method
+  - [x] flagSuspiciousActivity method
+  - [x] generateComplianceReport method
+
+### Phase 3: SDK Wrapper (src/sdk/)
+- [x] Create ExchangeShieldedSDK class (exchange-sdk.ts)
+  - [x] processWithdrawal method
+  - [x] getWithdrawalStatus method
+  - [x] estimateWithdrawalFee method
+  - [x] getComplianceReport method
+  - [x] exportViewingKeys method
+
+### Phase 4: Python Bindings (python/)
+- [x] Create Python package structure
+  - [x] python/exchange_shielded_sdk/__init__.py
+  - [x] python/exchange_shielded_sdk/client.py
+  - [x] python/setup.py
+- [x] Implement subprocess-based Node.js bridge
+
+### Phase 5: Testing
+- [x] Security tests (key isolation, no keys in logs)
+- [x] Rate limiter tests (limits enforced, cooldowns work)
+- [x] Audit logger tests (events captured, redaction works)
+- [x] Integration tests for full withdrawal flow
+- [x] Achieve >90% code coverage
+
+### Phase 6: Integration
+- [x] Update src/index.ts exports
+- [x] Verify TypeScript compilation
+- [x] Run full test suite
+
+## Security Requirements (All Met)
+- Spending keys NEVER appear in any log output
+- All user input is sanitized before processing
+- Rate limits are enforced before any transaction processing
+- Audit logs are tamper-evident (include hashes of previous entries)
+
+## Implemented Files
+
+### Security Module (src/security/)
+- `key-manager.ts` - SecureKeyManager with key isolation
+- `sanitizer.ts` - Input sanitization and redaction
+- `rate-limiter.ts` - WithdrawalRateLimiter
+- `index.ts` - Module exports
+
+### Compliance Module (src/compliance/)
+- `audit-logger.ts` - Tamper-evident AuditLogger
+- `compliance.ts` - ComplianceManager
+- `index.ts` - Module exports
+
+### SDK Module (src/sdk/)
+- `exchange-sdk.ts` - ExchangeShieldedSDK
+- `index.ts` - Module exports
+
+### Python Bindings (python/)
+- `exchange_shielded_sdk/__init__.py` - Package exports
+- `exchange_shielded_sdk/client.py` - ExchangeClient wrapper
+- `setup.py` - Package setup
+- `pyproject.toml` - Modern Python packaging
+- `README.md` - Python package documentation
+
+### Test Files
+- `tests/security.test.ts` - 71 tests for key manager and sanitization
+- `tests/rate-limiter.test.ts` - 30 tests for rate limiting
+- `tests/audit-logger.test.ts` - 52 tests for audit logging and compliance
+- `tests/integration.test.ts` - 25 tests for full SDK integration
+
+---
+
+## Milestone 2: Transaction Building (COMPLETED)
 
 ### Status: COMPLETED
 
@@ -55,52 +166,6 @@
 - [x] Verify TypeScript compilation
 - [x] Run full test suite
 
-## Architecture Notes
-
-### ZIP 317 Fee Structure
-- Marginal fee: 5,000 zatoshis per logical action
-- Grace actions: 2 (minimum fee = 10,000 zatoshis)
-- Formula: `conventional_fee = marginal_fee * max(grace_actions, logical_actions)`
-
-### Logical Actions Calculation
-- Transparent: max(ceil(input_bytes/150), ceil(output_bytes/34))
-- Sapling: max(spends, outputs)
-- Orchard: action count
-
-### RPC Method Summary
-| Method | Parameters | Returns |
-|--------|------------|---------|
-| z_sendmany | fromaddress, amounts[], minconf?, fee?, privacyPolicy? | operationid |
-| z_getbalance | address, minconf?, inZat? | amount |
-| z_listunspent | minconf?, maxconf?, includeWatchonly?, addresses? | UnspentNote[] |
-| z_gettotalbalance | minconf?, includeWatchonly? | {transparent, private, total} |
-| z_getoperationstatus | operationIds[]? | OperationStatus[] |
-| z_getoperationresult | operationIds[]? | OperationResult[] |
-
-### Privacy Policies
-| Policy | Description |
-|--------|-------------|
-| FullPrivacy | Maximum privacy, shielded-to-shielded only |
-| LegacyCompat | Compatible with legacy transactions |
-| AllowRevealedAmounts | Permits revealing transaction amounts |
-| AllowRevealedRecipients | Permits revealing recipient addresses |
-| AllowRevealedSenders | Permits revealing sender addresses |
-| AllowFullyTransparent | Allows fully transparent transactions |
-| AllowLinkingAccountAddresses | Allows linking account addresses |
-| NoPrivacy | No privacy guarantees |
-
-## Implemented Files
-
-### Source Files
-- `src/transaction-builder.ts` - ShieldedTransactionBuilder and ZIP 317 fee estimation
-- `src/rpc-client.ts` - ZcashRpcClient for zcashd JSON-RPC communication
-- `src/index.ts` - Updated exports for all modules
-
-### Test Files
-- `tests/transaction-builder.test.ts` - 94 tests for transaction builder
-- `tests/rpc-client.test.ts` - 41 tests for RPC client
-- `tests/address-validator.test.ts` - 48 tests for address validation (Milestone 1)
-
 ---
 
 ## Milestone 1: Address Validation (COMPLETED)
@@ -117,77 +182,133 @@
 - validateAddressDetailed function
 - getAddressPrefixes function
 
+---
+
 ## Usage Examples
 
-### Transaction Building
+### Security Layer
 
 ```typescript
-import { ShieldedTransactionBuilder } from 'exchange-shielded-sdk';
+import {
+  SecureKeyManager,
+  sanitizeAddress,
+  redactSensitiveData,
+  WithdrawalRateLimiter
+} from 'exchange-shielded-sdk';
 
-// Create a transaction builder
-const builder = new ShieldedTransactionBuilder({
-  minconf: 10,
-  privacyPolicy: 'FullPrivacy'
+// Key Management (keys never leak to logs)
+const keyManager = new SecureKeyManager();
+await keyManager.loadKey('key-1', encryptedKeyBuffer, 'password');
+const signature = keyManager.signTransaction('key-1', txData);
+keyManager.clearKey('key-1');
+
+// Input Sanitization
+const addrResult = sanitizeAddress('  zs1abc...  ');
+if (addrResult.valid) {
+  console.log('Sanitized:', addrResult.address);
+}
+
+// Safe Logging (redacts sensitive data)
+const safeData = redactSensitiveData({
+  userId: 'user-123',
+  spendingKey: 'secret-data',
+  amount: 10.5
 });
+console.log(safeData); // spendingKey is [REDACTED]
 
-// Build a shielded withdrawal
-const tx = builder.buildShieldedWithdrawal(
-  'zs1source...',  // Shielded source address
-  't1dest...',     // Destination (can be transparent or shielded)
-  1.5,             // Amount in ZEC
-  '48656c6c6f'     // Optional hex-encoded memo
-);
-
-// Estimate the fee
-const fee = await builder.estimateFee(tx);
-console.log(`Estimated fee: ${fee} ZEC`);
-
-// Prepare for RPC submission
-const request = builder.prepareZSendmany(tx);
+// Rate Limiting
+const limiter = new WithdrawalRateLimiter({
+  maxWithdrawalsPerHour: 5,
+  maxTotalAmountPerDay: 100,
+  cooldownMs: 60000
+});
+const result = limiter.checkLimit('user-123', 10.0);
+if (result.allowed) {
+  limiter.recordWithdrawal('user-123', 10.0);
+}
 ```
 
-### RPC Client
+### Compliance
 
 ```typescript
-import { ZcashRpcClient, createRpcClient } from 'exchange-shielded-sdk';
+import {
+  AuditLogger,
+  AuditEventType,
+  AuditSeverity,
+  ComplianceManager
+} from 'exchange-shielded-sdk';
 
-// Create an RPC client
-const client = createRpcClient('127.0.0.1', 8232, {
-  username: 'rpcuser',
-  password: 'rpcpassword'
+// Tamper-evident Audit Logging
+const logger = new AuditLogger();
+logger.log({
+  eventType: AuditEventType.WITHDRAWAL_COMPLETED,
+  severity: AuditSeverity.INFO,
+  userId: 'user-123',
+  amount: 10.5
 });
 
-// Check balance
-const balance = await client.z_getbalance('zs1...');
-console.log(`Balance: ${balance} ZEC`);
-
-// List unspent notes
-const notes = await client.z_listunspent(1, 9999999, false, ['zs1...']);
-
-// Send a transaction and wait for completion
-const txid = await client.sendAndWait(
-  'zs1source...',
-  [{ address: 'zs1dest...', amount: 1.0 }],
-  { timeoutMs: 300000 }
+// Compliance Report
+const report = logger.exportForCompliance(
+  new Date('2024-01-01'),
+  new Date('2024-12-31')
 );
-console.log(`Transaction ID: ${txid}`);
+console.log('Total withdrawals:', report.summary.withdrawalCount);
+
+// Velocity Checks
+const compliance = new ComplianceManager();
+const velocity = compliance.checkVelocity('user-123', 100);
+if (!velocity.passed) {
+  compliance.flagSuspiciousActivity('user-123', velocity.reason);
+}
 ```
 
-### Fee Estimation
+### Full SDK
 
 ```typescript
-import { estimateTransactionFee, ZIP317 } from 'exchange-shielded-sdk';
+import { ExchangeShieldedSDK } from 'exchange-shielded-sdk';
 
-// Estimate fee for a specific transaction structure
-const estimate = estimateTransactionFee({
-  saplingSpends: 1,
-  saplingOutputs: 2,
-  orchardActions: 0,
-  transparentInputs: 0,
-  transparentOutputs: 1
+const sdk = new ExchangeShieldedSDK({
+  rpc: {
+    host: '127.0.0.1',
+    port: 8232,
+    auth: { username: 'user', password: 'pass' }
+  },
+  enableCompliance: true,
+  enableAuditLogging: true
 });
 
-console.log(`Fee: ${estimate.zec} ZEC (${estimate.zatoshis} zatoshis)`);
-console.log(`Logical actions: ${estimate.logicalActions}`);
-console.log(`Minimum fee: ${ZIP317.MINIMUM_FEE} zatoshis`);
+// Process withdrawal with all checks
+const result = await sdk.processWithdrawal({
+  userId: 'user-123',
+  fromAddress: 'zs1source...',
+  toAddress: 'zs1dest...',
+  amount: 10.5
+});
+
+if (result.success) {
+  console.log('Transaction ID:', result.transactionId);
+}
+```
+
+### Python Bindings
+
+```python
+from exchange_shielded_sdk import ExchangeClient
+
+client = ExchangeClient(
+    rpc_host='127.0.0.1',
+    rpc_port=8232,
+    rpc_user='user',
+    rpc_password='pass'
+)
+
+result = client.process_withdrawal(
+    user_id='user-123',
+    from_address='zs1source...',
+    to_address='zs1dest...',
+    amount=10.5
+)
+
+if result.success:
+    print(f'Transaction ID: {result.transaction_id}')
 ```
