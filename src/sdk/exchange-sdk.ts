@@ -34,6 +34,7 @@ import {
   ViewingKeyBundle,
   VelocityCheckResult,
 } from '../compliance/compliance.js';
+import { isShielded } from '../address-validator.js';
 
 /**
  * SDK configuration
@@ -295,6 +296,17 @@ export class ExchangeShieldedSDK {
           request.userId,
           fromResult.error ?? 'Invalid source address',
           'INVALID_FROM_ADDRESS'
+        );
+      }
+
+      // SECURITY: Validate that fromAddress is shielded UPFRONT
+      // This provides a clear error instead of failing deep in the transaction builder
+      if (!isShielded(fromResult.address)) {
+        return this.failWithdrawal(
+          requestId,
+          request.userId,
+          'Source address must be shielded (zs/u1)',
+          'FROM_ADDRESS_NOT_SHIELDED'
         );
       }
 

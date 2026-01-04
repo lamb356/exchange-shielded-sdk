@@ -145,6 +145,20 @@ describe('ExchangeShieldedSDK Integration', () => {
       expect(result.errorCode).toBe('INVALID_FROM_ADDRESS');
     });
 
+    it('should reject transparent source address with clear error', async () => {
+      // SECURITY: Transparent addresses cannot be used as source for shielded withdrawals
+      const result = await sdk.processWithdrawal({
+        userId: 'user-1',
+        fromAddress: 't1Rv4exT7bqhZqi2j7xz8bUHDMxwosrjADU', // transparent address
+        toAddress: saplingDest,
+        amount: 10,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('FROM_ADDRESS_NOT_SHIELDED');
+      expect(result.error).toContain('shielded');
+    });
+
     it('should reject invalid destination address', async () => {
       const result = await sdk.processWithdrawal({
         userId: 'user-1',
