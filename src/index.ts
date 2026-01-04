@@ -79,6 +79,24 @@ export type {
 } from './rpc-client.js';
 
 // =============================================================================
+// Utilities exports
+// =============================================================================
+export {
+  ZATOSHIS_PER_ZEC,
+  MAX_ZATOSHIS,
+  MIN_ZATOSHIS,
+  AmountError,
+  zecToZatoshis,
+  zatoshisToZec,
+  validateZatoshis,
+  validatePositiveZatoshis,
+  formatZatoshis,
+  parseAmountToZatoshis,
+  addZatoshis,
+  subtractZatoshis,
+} from './utils/index.js';
+
+// =============================================================================
 // Security exports
 // =============================================================================
 export {
@@ -87,6 +105,7 @@ export {
   KeyManagerError,
   createKeyManager,
   // Sanitizer
+  ValidationError,
   sanitizeAddress,
   sanitizeAmount,
   sanitizeMemo,

@@ -231,6 +231,23 @@ interface SDKConfig {
 | Unified | `u1` | Bech32m | Multi-receiver address (NU5+) |
 | Unified (testnet) | `utest` | Bech32m | Testnet unified addresses |
 
+## Amount Handling
+
+All amounts in this SDK should use **zatoshis (bigint)** to prevent floating-point rounding errors:
+
+```typescript
+import { zecToZatoshis, zatoshisToZec, validateZatoshis } from 'exchange-shielded-sdk';
+
+// Convert ZEC to zatoshis (1 ZEC = 100,000,000 zatoshis)
+const zatoshis = zecToZatoshis(1.5);  // Returns: 150000000n
+
+// Convert back for display
+const zec = zatoshisToZec(150000000n);  // Returns: 1.5
+
+// Validate amounts
+validateZatoshis(amount);  // Throws if negative or exceeds 21M ZEC
+```
+
 ## Requirements
 
 - Node.js 18.0.0 or higher
