@@ -43,6 +43,12 @@ import {
 import { isShielded } from '../address-validator.js';
 import { zatoshisToZec, validatePositiveZatoshis, ZATOSHIS_PER_ZEC } from '../utils/amounts.js';
 import { Logger, LogLevel } from '../utils/logger.js';
+import {
+  IdempotencyStore,
+  WithdrawalStatusStore,
+  MemoryIdempotencyStore,
+  MemoryWithdrawalStatusStore,
+} from '../storage/index.js';
 
 /**
  * SDK configuration
@@ -66,6 +72,16 @@ export interface SDKConfig {
     | 'LegacyCompat'
     | 'AllowRevealedAmounts'
     | 'AllowRevealedRecipients';
+  /**
+   * Custom idempotency store for production deployment
+   * If not provided, uses in-memory storage (not suitable for production)
+   */
+  idempotencyStore?: IdempotencyStore;
+  /**
+   * Custom withdrawal status store for production deployment
+   * If not provided, uses in-memory storage (not suitable for production)
+   */
+  withdrawalStatusStore?: WithdrawalStatusStore;
 }
 
 /**
@@ -114,17 +130,26 @@ export interface WithdrawalResult {
 
 /**
  * Withdrawal status
+ *
+ * Tracks the lifecycle of a withdrawal from initial request to final confirmation.
+ * Status progresses: pending -> submitted -> mempool -> confirmed (or failed at any stage)
  */
 export interface WithdrawalStatus {
-  /** Current status */
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'unknown';
-  /** Transaction ID if available */
-  transactionId?: string;
-  /** Number of confirmations */
+  /** Request ID that initiated this withdrawal */
+  requestId: string;
+  /** Current status in the lifecycle */
+  status: 'pending' | 'submitted' | 'mempool' | 'confirmed' | 'failed' | 'unknown';
+  /** Transaction ID if available (after submission) */
+  txid?: string;
+  /** Number of confirmations (for mempool/confirmed status) */
   confirmations?: number;
+  /** Block height where transaction was mined */
+  blockHeight?: number;
   /** Error message if failed */
   error?: string;
-  /** Last updated timestamp */
+  /** When the withdrawal was first created */
+  createdAt: Date;
+  /** When the status was last updated */
   updatedAt: Date;
 }
 
@@ -206,13 +231,24 @@ export class ExchangeShieldedSDK {
   private readonly pendingOperations: Map<string, { userId: string; requestId?: string }>;
 
   /**
-   * Request ID cache for idempotency
+   * Idempotency store for preventing double-withdrawals
    *
    * SECURITY: Prevents double-withdrawals when clients retry failed requests.
    * If a requestId has already been processed, the cached result is returned
    * instead of processing the withdrawal again.
+   *
+   * WARNING: In-memory by default - provide custom store for production.
    */
-  private readonly requestIdCache: Map<string, WithdrawalResult>;
+  private readonly idempotencyStore: IdempotencyStore;
+
+  /**
+   * Withdrawal status store for lifecycle tracking
+   *
+   * Tracks withdrawal status from pending through confirmation.
+   *
+   * WARNING: In-memory by default - provide custom store for production.
+   */
+  private readonly withdrawalStatusStore: WithdrawalStatusStore;
 
   /**
    * Creates a new ExchangeShieldedSDK
@@ -251,8 +287,10 @@ export class ExchangeShieldedSDK {
     // Initialize pending operations tracking
     this.pendingOperations = new Map();
 
-    // Initialize request ID cache for idempotency
-    this.requestIdCache = new Map();
+    // Initialize storage (use provided stores or default to in-memory)
+    // WARNING: In-memory storage is NOT suitable for production
+    this.idempotencyStore = config.idempotencyStore ?? new MemoryIdempotencyStore();
+    this.withdrawalStatusStore = config.withdrawalStatusStore ?? new MemoryWithdrawalStatusStore();
   }
 
   /**
@@ -275,8 +313,8 @@ export class ExchangeShieldedSDK {
 
     // IDEMPOTENCY CHECK: If this requestId has already been processed, return cached result
     // This prevents double-withdrawals when clients retry failed network requests
-    const cachedResult = this.requestIdCache.get(requestId);
-    if (cachedResult !== undefined) {
+    const cachedResult = await this.idempotencyStore.get(requestId);
+    if (cachedResult !== null) {
       // Log that we returned a cached result
       if (this.config.enableAuditLogging !== false) {
         this.auditLogger.log({
@@ -292,6 +330,15 @@ export class ExchangeShieldedSDK {
       }
       return cachedResult;
     }
+
+    // Create initial pending status
+    const now = new Date();
+    await this.withdrawalStatusStore.set({
+      requestId,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    });
 
     try {
       // Validate and sanitize inputs first
@@ -390,7 +437,7 @@ export class ExchangeShieldedSDK {
         }
 
         // Cache rate limit failures for idempotency (prevents repeated rate limit checks on retry)
-        return this.failWithdrawalAndCache(
+        return await this.failWithdrawalAndCache(
           requestId,
           request.userId,
           rateLimitResult.reason ?? 'Rate limit exceeded',
@@ -413,7 +460,7 @@ export class ExchangeShieldedSDK {
           );
 
           // Cache velocity failures for idempotency
-          return this.failWithdrawalAndCache(
+          return await this.failWithdrawalAndCache(
             requestId,
             request.userId,
             velocityResult.reason ?? 'Velocity check failed',
@@ -490,22 +537,32 @@ export class ExchangeShieldedSDK {
           ? BigInt(Math.round(zsendmanyRequest.fee * 100_000_000))
           : undefined;
 
+        const completedAt = new Date();
         const successResult: WithdrawalResult = {
           success: true,
           transactionId: result.result.txid,
           operationId,
           fee: feeZatoshis,
           requestId,
-          completedAt: new Date(),
+          completedAt,
         };
 
         // Cache the result for idempotency
-        this.requestIdCache.set(requestId, successResult);
+        await this.idempotencyStore.set(requestId, successResult);
+
+        // Update withdrawal status to submitted (will be updated to confirmed by refresh)
+        await this.withdrawalStatusStore.set({
+          requestId,
+          status: 'submitted',
+          txid: result.result.txid,
+          createdAt: completedAt,
+          updatedAt: completedAt,
+        });
 
         return successResult;
       } else {
         const errorMessage = result.error?.message ?? 'Transaction failed';
-        return this.failWithdrawalAndCache(requestId, request.userId, errorMessage, 'TX_FAILED');
+        return await this.failWithdrawalAndCache(requestId, request.userId, errorMessage, 'TX_FAILED');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -513,34 +570,120 @@ export class ExchangeShieldedSDK {
       // Log with redacted error using structured logger
       this.logger.error('Withdrawal failed', redactSensitiveData({ error: errorMessage }) as Record<string, unknown>);
 
-      return this.failWithdrawalAndCache(requestId, request.userId, errorMessage, 'INTERNAL_ERROR');
+      return await this.failWithdrawalAndCache(requestId, request.userId, errorMessage, 'INTERNAL_ERROR');
     }
   }
 
   /**
-   * Gets the status of a withdrawal by transaction ID
+   * Gets the status of a withdrawal by request ID
    *
-   * @param txId - The transaction ID
-   * @returns The withdrawal status
+   * @param requestId - The request ID
+   * @returns The withdrawal status, or null if not found
    */
-  async getWithdrawalStatus(txId: string): Promise<WithdrawalStatus> {
-    try {
-      // In a full implementation, we would query the transaction status
-      // from zcashd using getrawtransaction or similar
+  async getWithdrawalStatus(requestId: string): Promise<WithdrawalStatus | null> {
+    // Check in withdrawal status store
+    const status = await this.withdrawalStatusStore.get(requestId);
+    if (status) {
+      return status;
+    }
 
-      // For now, return a basic status
+    // Fall back to idempotency cache for basic info
+    const cachedResult = await this.idempotencyStore.get(requestId);
+    if (cachedResult) {
+      const now = new Date();
       return {
-        status: 'unknown',
-        transactionId: txId,
-        updatedAt: new Date(),
-      };
-    } catch (error) {
-      return {
-        status: 'unknown',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        updatedAt: new Date(),
+        requestId,
+        status: cachedResult.success ? 'confirmed' : 'failed',
+        txid: cachedResult.transactionId,
+        error: cachedResult.error,
+        createdAt: cachedResult.completedAt ?? now,
+        updatedAt: now,
       };
     }
+
+    return null;
+  }
+
+  /**
+   * Refreshes the status of a withdrawal by querying zcashd
+   *
+   * This queries the blockchain for the current transaction status,
+   * including confirmation count and block height.
+   *
+   * @param requestId - The request ID
+   * @returns Updated withdrawal status, or null if not found
+   */
+  async refreshWithdrawalStatus(requestId: string): Promise<WithdrawalStatus | null> {
+    const status = await this.getWithdrawalStatus(requestId);
+    if (!status || !status.txid) {
+      return status;
+    }
+
+    try {
+      // Query transaction from zcashd
+      // gettransaction returns: { confirmations, blockheight, ... }
+      interface TransactionInfo {
+        confirmations?: number;
+        blockheight?: number;
+      }
+      const txInfo = await this.rpcClient.call<TransactionInfo>('gettransaction', [status.txid]);
+
+      const now = new Date();
+      const confirmations = typeof txInfo.confirmations === 'number' ? txInfo.confirmations : 0;
+
+      let newStatus: WithdrawalStatus['status'];
+      if (confirmations === 0) {
+        newStatus = 'mempool';
+      } else if (confirmations > 0) {
+        newStatus = 'confirmed';
+      } else {
+        newStatus = 'unknown';
+      }
+
+      const updatedStatus: WithdrawalStatus = {
+        requestId,
+        status: newStatus,
+        txid: status.txid,
+        confirmations,
+        blockHeight: typeof txInfo.blockheight === 'number' ? txInfo.blockheight : undefined,
+        createdAt: status.createdAt,
+        updatedAt: now,
+      };
+
+      // Update the status store
+      await this.withdrawalStatusStore.set(updatedStatus);
+
+      return updatedStatus;
+    } catch (error) {
+      // Transaction might not be found (reorg, etc.)
+      this.logger.warn('Failed to refresh withdrawal status', {
+        requestId,
+        txid: status.txid,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return status;
+    }
+  }
+
+  /**
+   * Lists all pending (non-confirmed) withdrawals
+   *
+   * Returns withdrawals with status: pending, submitted, or mempool
+   *
+   * @returns Array of pending withdrawal statuses
+   */
+  async listPendingWithdrawals(): Promise<WithdrawalStatus[]> {
+    return this.withdrawalStatusStore.listPending();
+  }
+
+  /**
+   * Gets a withdrawal status by transaction ID
+   *
+   * @param txid - The blockchain transaction ID
+   * @returns The withdrawal status, or null if not found
+   */
+  async getWithdrawalByTxid(txid: string): Promise<WithdrawalStatus | null> {
+    return this.withdrawalStatusStore.getByTxid(txid);
   }
 
   /**
@@ -695,16 +838,25 @@ export class ExchangeShieldedSDK {
    * Helper to create a failed withdrawal result AND cache it for idempotency
    * Used for failures after the withdrawal was actually attempted.
    */
-  private failWithdrawalAndCache(
+  private async failWithdrawalAndCache(
     requestId: string,
     userId: string,
     error: string,
     errorCode: string
-  ): WithdrawalResult {
+  ): Promise<WithdrawalResult> {
     const result = this.failWithdrawal(requestId, userId, error, errorCode);
 
     // Cache the result for idempotency
-    this.requestIdCache.set(requestId, result);
+    await this.idempotencyStore.set(requestId, result);
+
+    // Update withdrawal status to failed
+    await this.withdrawalStatusStore.set({
+      requestId,
+      status: 'failed',
+      error,
+      createdAt: result.completedAt ?? new Date(),
+      updatedAt: result.completedAt ?? new Date(),
+    });
 
     return result;
   }

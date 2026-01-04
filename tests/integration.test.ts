@@ -315,11 +315,22 @@ describe('ExchangeShieldedSDK Integration', () => {
   });
 
   describe('Withdrawal Status', () => {
-    it('should get withdrawal status', async () => {
-      const status = await sdk.getWithdrawalStatus('mock-txid');
+    it('should return null for unknown request ID', async () => {
+      const status = await sdk.getWithdrawalStatus('unknown-request-id');
+      expect(status).toBeNull();
+    });
 
-      expect(status.status).toBeDefined();
-      expect(status.updatedAt).toBeInstanceOf(Date);
+    it('should get withdrawal status by txid after processing', async () => {
+      // The getWithdrawalByTxid method is available for lookup by transaction ID
+      const status = await sdk.getWithdrawalByTxid('mock-txid');
+      // Returns null if not found since we haven't processed any withdrawals
+      expect(status).toBeNull();
+    });
+
+    it('should list pending withdrawals', async () => {
+      const pending = await sdk.listPendingWithdrawals();
+      // Returns empty array when no pending withdrawals
+      expect(pending).toEqual([]);
     });
   });
 

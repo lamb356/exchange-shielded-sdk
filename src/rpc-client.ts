@@ -578,6 +578,27 @@ export class ZcashRpcClient {
 
     throw new RpcError('Transaction completed but no txid returned', -1);
   }
+
+  /**
+   * Makes a generic RPC call to zcashd
+   *
+   * Use this method for RPC calls not covered by the typed methods.
+   *
+   * @param method - RPC method name
+   * @param params - Method parameters
+   * @returns Promise resolving to the result
+   * @throws RpcError if the request fails
+   *
+   * @example
+   * ```typescript
+   * // Get transaction info
+   * const txInfo = await client.call('gettransaction', ['txid...']);
+   * console.log('Confirmations:', txInfo.confirmations);
+   * ```
+   */
+  async call<T = unknown>(method: string, params: unknown[] = []): Promise<T> {
+    return this.rpcCall<T>(method, params);
+  }
 }
 
 /**

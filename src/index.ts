@@ -191,3 +191,24 @@ export type {
   WithdrawalStatus,
   FeeEstimate as SDKFeeEstimate,
 } from './sdk/index.js';
+
+// =============================================================================
+// Storage exports
+// =============================================================================
+export {
+  // In-memory implementations (development/testing only)
+  MemoryIdempotencyStore,
+  MemoryRateLimitStore,
+  MemoryAuditLogSink,
+  MemoryWithdrawalStatusStore,
+  createMemoryStores,
+} from './storage/index.js';
+
+export type {
+  // Storage interfaces for production implementations
+  UserLimitData,
+  IdempotencyStore,
+  RateLimitStore,
+  AuditLogSink,
+  WithdrawalStatusStore,
+} from './storage/index.js';
