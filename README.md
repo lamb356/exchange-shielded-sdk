@@ -248,6 +248,50 @@ const zec = zatoshisToZec(150000000n);  // Returns: 1.5
 validateZatoshis(amount);  // Throws if negative or exceeds 21M ZEC
 ```
 
+## Production Warnings
+
+> **Important**: Review these items before deploying to production.
+
+### Rate Limits are In-Memory Only
+
+Rate limits are stored in-memory and will be lost on restart. For production deployments with multiple instances or high availability requirements:
+
+```typescript
+// TODO: Implement Redis backing for rate limits
+// The WithdrawalRateLimiter class is designed for single-instance use.
+// For production, implement a custom rate limiter backed by Redis or similar.
+```
+
+### getWithdrawalStatus() is a Stub
+
+The `getWithdrawalStatus()` method currently returns a basic status. For production, implement proper confirmation tracking:
+
+```typescript
+// Current behavior: returns { status: 'unknown', ... }
+// Production: Implement transaction confirmation tracking via z_gettransaction
+```
+
+### RPC Security
+
+- **Always use TLS** for RPC connections to non-localhost nodes
+- **Never log credentials** - the SDK redacts sensitive data but ensure your logging doesn't expose auth
+- Use environment variables or secure vaults for RPC credentials
+
+```typescript
+// Good: Load credentials from environment
+const sdk = createExchangeSDK({
+  rpc: {
+    host: process.env.ZCASH_RPC_HOST!,
+    port: parseInt(process.env.ZCASH_RPC_PORT!),
+    auth: {
+      username: process.env.ZCASH_RPC_USER!,
+      password: process.env.ZCASH_RPC_PASS!,
+    },
+    tls: process.env.NODE_ENV === 'production', // Enable TLS in production
+  },
+});
+```
+
 ## Requirements
 
 - Node.js 18.0.0 or higher
