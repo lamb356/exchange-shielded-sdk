@@ -65,6 +65,7 @@ export function toWithdrawalResultDTO(result: WithdrawalResult): WithdrawalResul
     requestId: result.requestId,
     transactionId: result.transactionId,
     operationId: result.operationId,
+    amount: result.amount !== undefined ? result.amount.toString() : undefined,
     fee: result.fee !== undefined ? result.fee.toString() : undefined,
     error: result.error,
     errorCode: result.errorCode,

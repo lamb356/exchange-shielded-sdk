@@ -133,6 +133,8 @@ export interface WithdrawalResult {
   error?: string;
   /** Error code if failed */
   errorCode?: string;
+  /** Amount withdrawn in zatoshis (1 ZEC = 100_000_000n zatoshis) */
+  amount?: bigint;
   /** Fee paid in zatoshis (1 ZEC = 100_000_000n zatoshis) */
   fee?: bigint;
   /** Request ID from the original request */
