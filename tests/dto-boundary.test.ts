@@ -1,6 +1,7 @@
 import {
   WithdrawalRequestDTO,
   WithdrawalResultDTO,
+  WithdrawalStatusDTO,
   toWithdrawalResultDTO,
   fromWithdrawalRequestDTO,
   toWithdrawalStatusDTO,
@@ -12,6 +13,12 @@ import {
   validateUserIdInput,
   IngestValidationError,
 } from '../src/validation/ingest.js';
+import {
+  ExchangeShieldedSDK,
+  createExchangeSDK,
+  setValidationOptions,
+  resetValidationOptions,
+} from '../src/index.js';
 
 describe('DTO Boundary', () => {
   describe('toWithdrawalResultDTO', () => {
@@ -218,5 +225,112 @@ describe('DTO Round-Trip', () => {
     const resultDTO = toWithdrawalResultDTO(result);
     expect(resultDTO.amount).toBe('150000000');
     expect(resultDTO.fee).toBe('10000');
+  });
+});
+
+describe('SDK DTO Methods', () => {
+  let sdk: ExchangeShieldedSDK;
+
+  beforeAll(() => {
+    setValidationOptions({ skipChecksum: true });
+  });
+
+  afterAll(() => {
+    resetValidationOptions();
+  });
+
+  beforeEach(() => {
+    sdk = createExchangeSDK({
+      rpc: {
+        host: '127.0.0.1',
+        port: 8232,
+        auth: { username: 'test', password: 'test' },
+      },
+    });
+  });
+
+  describe('processWithdrawalDTO', () => {
+    it('should accept DTO and return DTO', async () => {
+      const requestDTO: WithdrawalRequestDTO = {
+        userId: 'user-123',
+        fromAddress: 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress: 'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: '150000000',
+      };
+
+      // Will fail at RPC level, but should pass DTO boundary checks
+      const resultDTO = await sdk.processWithdrawalDTO(requestDTO);
+
+      // Verify result is JSON-serializable (no bigint)
+      expect(() => JSON.stringify(resultDTO)).not.toThrow();
+      expect(typeof resultDTO.success).toBe('boolean');
+      expect(resultDTO.requestId).toBeDefined();
+    });
+
+    it('should reject invalid amount string', async () => {
+      const badDTO: WithdrawalRequestDTO = {
+        userId: 'user-123',
+        fromAddress: 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress: 'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: '1.5', // Not an integer
+      };
+
+      await expect(sdk.processWithdrawalDTO(badDTO)).rejects.toThrow(/integer/);
+    });
+
+    it('should reject negative amount', async () => {
+      const badDTO: WithdrawalRequestDTO = {
+        userId: 'user-123',
+        fromAddress: 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress: 'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: '-100',
+      };
+
+      await expect(sdk.processWithdrawalDTO(badDTO)).rejects.toThrow(/non-negative/);
+    });
+  });
+
+  describe('DTO serialization safety', () => {
+    it('should never expose bigint in DTO response', async () => {
+      const requestDTO: WithdrawalRequestDTO = {
+        userId: 'user-123',
+        fromAddress: 'zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly',
+        toAddress: 'zs1x3ev0n0nf7zdmzq7e66t8y93f5fk8q9gww5y8ctr3fvwj7j8n2q9vg3p8rlv7e9a5u7w0fjhsny',
+        amount: '150000000',
+      };
+
+      const resultDTO = await sdk.processWithdrawalDTO(requestDTO);
+
+      // JSON.stringify throws on bigint - this verifies no bigint in DTO
+      const json = JSON.stringify(resultDTO);
+      expect(json).toBeDefined();
+
+      // Verify it can be parsed back
+      const parsed = JSON.parse(json);
+      expect(parsed.success).toBe(resultDTO.success);
+    });
+  });
+
+  describe('status DTO methods', () => {
+    it('getWithdrawalStatusDTO returns null for unknown request', async () => {
+      const status = await sdk.getWithdrawalStatusDTO('nonexistent-request');
+      expect(status).toBeNull();
+    });
+
+    it('listPendingWithdrawalsDTO returns empty array initially', async () => {
+      const pending = await sdk.listPendingWithdrawalsDTO();
+      expect(Array.isArray(pending)).toBe(true);
+      expect(pending.length).toBe(0);
+    });
+
+    it('getWithdrawalByTxidDTO returns null for unknown txid', async () => {
+      const status = await sdk.getWithdrawalByTxidDTO('nonexistent-txid');
+      expect(status).toBeNull();
+    });
+
+    it('refreshWithdrawalStatusDTO returns null for unknown request', async () => {
+      const status = await sdk.refreshWithdrawalStatusDTO('nonexistent-request');
+      expect(status).toBeNull();
+    });
   });
 });

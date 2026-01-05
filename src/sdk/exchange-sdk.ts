@@ -50,6 +50,14 @@ import {
   MemoryIdempotencyStore,
   MemoryWithdrawalStatusStore,
 } from '../storage/index.js';
+import {
+  WithdrawalRequestDTO,
+  WithdrawalResultDTO,
+  WithdrawalStatusDTO,
+  toWithdrawalResultDTO,
+  fromWithdrawalRequestDTO,
+  toWithdrawalStatusDTO,
+} from '../types/dto.js';
 
 /**
  * SDK configuration
@@ -694,6 +702,70 @@ export class ExchangeShieldedSDK {
    */
   async getWithdrawalByTxid(txid: string): Promise<WithdrawalStatus | null> {
     return this.withdrawalStatusStore.getByTxid(txid);
+  }
+
+  // ===========================================================================
+  // DTO Boundary Methods
+  // These methods provide JSON-safe entry/exit points for external integrations
+  // ===========================================================================
+
+  /**
+   * Process withdrawal with DTO boundary enforcement
+   * This is the recommended entry point for external integrations
+   *
+   * @param request - External withdrawal request DTO (string amounts)
+   * @returns Withdrawal result DTO (string amounts, JSON-safe)
+   */
+  async processWithdrawalDTO(request: WithdrawalRequestDTO): Promise<WithdrawalResultDTO> {
+    const internalRequest = fromWithdrawalRequestDTO(request);
+    const result = await this.processWithdrawal(internalRequest);
+    return toWithdrawalResultDTO(result);
+  }
+
+  /**
+   * Get withdrawal status with DTO boundary
+   *
+   * @param requestId - The request ID
+   * @returns Withdrawal status DTO, or null if not found or unknown
+   */
+  async getWithdrawalStatusDTO(requestId: string): Promise<WithdrawalStatusDTO | null> {
+    const status = await this.getWithdrawalStatus(requestId);
+    if (!status || status.status === 'unknown') return null;
+    return toWithdrawalStatusDTO(status);
+  }
+
+  /**
+   * List pending withdrawals with DTO boundary
+   *
+   * @returns Array of pending withdrawal status DTOs
+   */
+  async listPendingWithdrawalsDTO(): Promise<WithdrawalStatusDTO[]> {
+    const statuses = await this.listPendingWithdrawals();
+    return statuses.map(toWithdrawalStatusDTO);
+  }
+
+  /**
+   * Get withdrawal by txid with DTO boundary
+   *
+   * @param txid - The blockchain transaction ID
+   * @returns Withdrawal status DTO, or null if not found
+   */
+  async getWithdrawalByTxidDTO(txid: string): Promise<WithdrawalStatusDTO | null> {
+    const status = await this.getWithdrawalByTxid(txid);
+    if (!status) return null;
+    return toWithdrawalStatusDTO(status);
+  }
+
+  /**
+   * Refresh withdrawal status with DTO boundary
+   *
+   * @param requestId - The request ID
+   * @returns Updated withdrawal status DTO, or null if not found or unknown
+   */
+  async refreshWithdrawalStatusDTO(requestId: string): Promise<WithdrawalStatusDTO | null> {
+    const status = await this.refreshWithdrawalStatus(requestId);
+    if (!status || status.status === 'unknown') return null;
+    return toWithdrawalStatusDTO(status);
   }
 
   /**
