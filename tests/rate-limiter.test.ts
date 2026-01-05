@@ -410,10 +410,30 @@ describe('WithdrawalRateLimiter with external store', () => {
     });
 
     it('should enforce limits using external store', async () => {
+      // Set a fixed time at the start of an hour to avoid boundary issues
+      // This ensures all 5 withdrawals are in the same hour
+      const fixedHourStart = new Date();
+      fixedHourStart.setUTCMinutes(5, 0, 0); // 5 minutes into the hour
+      currentTime = fixedHourStart.getTime();
+
+      // Recreate limiter with the fixed time
+      store = new MemoryRateLimitStore();
+      limiter = new WithdrawalRateLimiter(
+        {
+          maxWithdrawalsPerHour: 5,
+          maxWithdrawalsPerDay: 20,
+          maxAmountPerWithdrawal: 100n * ZAT,
+          maxTotalAmountPerDay: 500n * ZAT,
+          cooldownMs: 60000,
+          store,
+        },
+        () => currentTime
+      );
+
       // Record 5 withdrawals through the async API
       for (let i = 0; i < 5; i++) {
         await limiter.recordWithdrawalAsync('user-1', 10n * ZAT);
-        advanceTime(61000); // Skip cooldown
+        advanceTime(61000); // Skip cooldown (5 * 61s = 305s < 55 min remaining in hour)
       }
 
       // 6th should be denied (hourly limit)
@@ -488,6 +508,25 @@ describe('WithdrawalRateLimiter with external store', () => {
     });
 
     it('should reflect consumed limits from store', async () => {
+      // Set a fixed time early in the hour to avoid boundary issues
+      const fixedHourStart = new Date();
+      fixedHourStart.setUTCMinutes(5, 0, 0);
+      currentTime = fixedHourStart.getTime();
+
+      // Recreate limiter with the fixed time
+      store = new MemoryRateLimitStore();
+      limiter = new WithdrawalRateLimiter(
+        {
+          maxWithdrawalsPerHour: 5,
+          maxWithdrawalsPerDay: 20,
+          maxAmountPerWithdrawal: 100n * ZAT,
+          maxTotalAmountPerDay: 500n * ZAT,
+          cooldownMs: 60000,
+          store,
+        },
+        () => currentTime
+      );
+
       await limiter.recordWithdrawalAsync('user-1', 100n * ZAT);
       advanceTime(61000);
       await limiter.recordWithdrawalAsync('user-1', 100n * ZAT);
