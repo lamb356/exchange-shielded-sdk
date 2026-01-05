@@ -5,12 +5,11 @@
  * Provides a unified API that combines transaction building, RPC communication,
  * security, and compliance features.
  *
- * IMPORTANT: All monetary amounts in this SDK are expressed in zatoshis (bigint).
- * 1 ZEC = 100_000_000 zatoshis (10^8)
+ * IMPORTANT: Core methods use bigint internally; external integrations should
+ * use the DTO boundary methods (processWithdrawalDTO, getWithdrawalStatusDTO, etc.)
+ * which accept/return string amounts for JSON safety.
  *
- * This zatoshis-first approach prevents floating-point rounding errors that
- * could lead to incorrect transaction amounts. Use the utility functions
- * zecToZatoshis() and zatoshisToZec() for conversions when needed.
+ * 1 ZEC = 100_000_000 zatoshis (10^8)
  *
  * @packageDocumentation
  */

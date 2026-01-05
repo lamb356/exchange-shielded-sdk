@@ -51,6 +51,33 @@ if (result.success) {
 }
 ```
 
+### Recommended: Use DTO Methods (JSON-Safe)
+
+For external integrations, use the DTO boundary methods which accept and return string amounts:
+
+```typescript
+import { createExchangeSDK, WithdrawalRequestDTO } from 'exchange-shielded-sdk';
+
+const sdk = createExchangeSDK({ /* config */ });
+
+// All amounts are strings - safe for JSON serialization
+const request: WithdrawalRequestDTO = {
+  userId: 'user-123',
+  fromAddress: 'zs1sourceaddress...',
+  toAddress: 't1destinationaddress...',
+  amount: '150000000',  // 1.5 ZEC in zatoshis (string)
+};
+
+const result = await sdk.processWithdrawalDTO(request);
+console.log(result.amount);  // "150000000" (string, JSON-safe)
+
+// Other DTO methods available:
+// sdk.getWithdrawalStatusDTO(requestId)
+// sdk.listPendingWithdrawalsDTO()
+// sdk.getWithdrawalByTxidDTO(txid)
+// sdk.refreshWithdrawalStatusDTO(requestId)
+```
+
 ### Address Validation
 
 ```typescript
