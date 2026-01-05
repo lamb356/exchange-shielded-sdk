@@ -128,6 +128,31 @@ export type {
 } from './types/index.js';
 
 // =============================================================================
+// DTO Types exports
+// =============================================================================
+export {
+  toWithdrawalResultDTO,
+  fromWithdrawalRequestDTO,
+  toWithdrawalStatusDTO,
+} from './types/index.js';
+
+export type {
+  WithdrawalRequestDTO,
+  WithdrawalResultDTO,
+  WithdrawalStatusDTO,
+} from './types/index.js';
+
+// =============================================================================
+// Validation exports
+// =============================================================================
+export {
+  IngestValidationError,
+  parseZatoshiInput,
+  validateAddressInput,
+  validateUserIdInput,
+} from './validation/index.js';
+
+// =============================================================================
 // Security exports
 // =============================================================================
 export {

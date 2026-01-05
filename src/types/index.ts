@@ -18,3 +18,16 @@ export type {
   Zatoshi,
   ZatoshiString,
 } from './money.js';
+
+// DTO types and converters
+export {
+  toWithdrawalResultDTO,
+  fromWithdrawalRequestDTO,
+  toWithdrawalStatusDTO,
+} from './dto.js';
+
+export type {
+  WithdrawalRequestDTO,
+  WithdrawalResultDTO,
+  WithdrawalStatusDTO,
+} from './dto.js';

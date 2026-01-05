@@ -82,6 +82,94 @@ This ensures:
 - Single place to audit for conversion errors
 - Type system enforces correct usage
 
+## DTO Boundary Guidelines
+
+The SDK enforces a clear separation between internal types (using branded `Zatoshi` bigints) and external DTOs (using string amounts for JSON safety).
+
+### Type Boundaries
+
+```
+External World (JSON)          SDK Internal               zcashd (JSON-RPC)
++------------------+          +------------------+       +------------------+
+| WithdrawalReq-   |  ingest  | WithdrawalRequest|       | z_sendmany       |
+| uestDTO          | -------> | (bigint amounts) | ----> | (ZEC strings)    |
+| (string amounts) |          |                  |       |                  |
++------------------+          +------------------+       +------------------+
+
++------------------+  egress  +------------------+
+| WithdrawalRes-   | <------- | WithdrawalResult |
+| ultDTO           |          | (bigint amounts) |
+| (string amounts) |          |                  |
++------------------+          +------------------+
+```
+
+### Validation at Ingest
+
+External inputs are validated and converted at the system boundary:
+
+```typescript
+import {
+  fromWithdrawalRequestDTO,
+  parseZatoshiInput,
+  validateAddressInput,
+  validateUserIdInput,
+  IngestValidationError,
+} from 'exchange-shielded-sdk';
+
+// Convert DTO to internal types (validates automatically)
+const dto: WithdrawalRequestDTO = req.body;
+const request = fromWithdrawalRequestDTO(dto);
+
+// Or validate individual fields
+try {
+  const amount = parseZatoshiInput(req.body.amount, 'amount');
+  const address = validateAddressInput(req.body.address, 'toAddress');
+  const userId = validateUserIdInput(req.body.userId);
+} catch (e) {
+  if (e instanceof IngestValidationError) {
+    console.log(`Invalid ${e.field}: ${e.message}`);
+  }
+}
+```
+
+### Serialization at Egress
+
+Internal results are converted to DTOs for API responses:
+
+```typescript
+import { toWithdrawalResultDTO, toWithdrawalStatusDTO } from 'exchange-shielded-sdk';
+
+// Process withdrawal (internal types)
+const result = await sdk.processWithdrawal(request);
+
+// Convert to DTO for API response
+const dto = toWithdrawalResultDTO(result);
+res.json(dto);  // Amounts are strings, safe for JSON
+```
+
+### DTO Types
+
+| DTO Type | Purpose | Amount Type |
+|----------|---------|-------------|
+| `WithdrawalRequestDTO` | API request body | `string` (zatoshis) |
+| `WithdrawalResultDTO` | API response body | `string` (zatoshis) |
+| `WithdrawalStatusDTO` | Status response | N/A |
+
+### Why Strings for External DTOs?
+
+1. **JSON Safety**: `JSON.stringify(1n)` throws; strings serialize safely
+2. **Precision**: No precision loss for large amounts (Number.MAX_SAFE_INTEGER is 9007199254740991)
+3. **Cross-language**: Strings work with any language's JSON parser
+4. **Explicit**: Clear that parsing/validation is needed
+
+### Input Validation Functions
+
+| Function | Input Types | Returns | Throws |
+|----------|-------------|---------|--------|
+| `parseZatoshiInput()` | string, bigint, number | `Zatoshi` | `IngestValidationError` |
+| `validateAddressInput()` | any | trimmed string | `IngestValidationError` |
+| `validateUserIdInput()` | any | trimmed string | `IngestValidationError` |
+
 ### 2. Storage Adapter Pattern
 
 **Why**: Production deployments need persistent, distributed storage. Development/testing needs simple, fast storage.
