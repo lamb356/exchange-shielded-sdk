@@ -256,3 +256,54 @@ export function subtractZatoshis(a: bigint, b: bigint): bigint {
   }
   return diff;
 }
+
+/**
+ * Safely serialize an object containing Zatoshi/bigint values to JSON
+ *
+ * JavaScript's JSON.stringify() throws on bigint. This function converts
+ * bigint values to strings for safe serialization.
+ *
+ * @param obj - The object to serialize
+ * @returns JSON string with bigints converted to strings
+ *
+ * @example
+ * ```typescript
+ * const json = safeJsonStringify({ amount: 100n, name: 'test' });
+ * // Returns: '{"amount":"100","name":"test"}'
+ * ```
+ */
+export function safeJsonStringify(obj: unknown): string {
+  return JSON.stringify(obj, (_key, value) =>
+    typeof value === 'bigint' ? value.toString() : value
+  );
+}
+
+/**
+ * Parse JSON that may contain zatoshi strings back to bigints
+ *
+ * Use this to deserialize JSON that was serialized with safeJsonStringify.
+ * Specify which keys should be converted from string to bigint.
+ *
+ * @param json - The JSON string to parse
+ * @param zatoshiKeys - Array of key names that should be converted to bigint
+ * @returns Parsed object with specified keys as bigint
+ *
+ * @example
+ * ```typescript
+ * const json = '{"amount":"150000000","fee":"10000"}';
+ * const parsed = safeJsonParse<{ amount: bigint; fee: bigint }>(
+ *   json,
+ *   ['amount', 'fee']
+ * );
+ * // parsed.amount === 150_000_000n
+ * // parsed.fee === 10_000n
+ * ```
+ */
+export function safeJsonParse<T>(json: string, zatoshiKeys: string[]): T {
+  return JSON.parse(json, (key, value) => {
+    if (zatoshiKeys.includes(key) && typeof value === 'string' && /^\d+$/.test(value)) {
+      return BigInt(value);
+    }
+    return value;
+  });
+}

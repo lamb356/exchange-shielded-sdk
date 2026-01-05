@@ -95,6 +95,8 @@ export {
   parseAmountToZatoshis,
   addZatoshis,
   subtractZatoshis,
+  safeJsonStringify,
+  safeJsonParse,
   // Logger
   LogLevel,
   Logger,
@@ -106,6 +108,24 @@ export type {
   LogEntry,
   LoggerConfig,
 } from './utils/index.js';
+
+// =============================================================================
+// Money Types exports
+// =============================================================================
+export {
+  zatoshi,
+  zecToZatoshi,
+  zatoshiToZec,
+  zatoshiToString,
+  stringToZatoshi,
+  ONE_ZEC,
+  MAX_SUPPLY,
+} from './types/index.js';
+
+export type {
+  Zatoshi,
+  ZatoshiString,
+} from './types/index.js';
 
 // =============================================================================
 // Security exports

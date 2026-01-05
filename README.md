@@ -248,6 +248,68 @@ const zec = zatoshisToZec(150000000n);  // Returns: 1.5
 validateZatoshis(amount);  // Throws if negative or exceeds 21M ZEC
 ```
 
+## Money & Units
+
+This SDK uses **zatoshis** (the smallest Zcash unit) internally to prevent floating-point errors.
+
+### Type System
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `Zatoshi` | Branded bigint for compile-time safety | `zatoshi(150_000_000n)` |
+| `ZatoshiString` | String representation for JSON | `"150000000"` |
+
+### Conversion
+
+- 1 ZEC = 100,000,000 zatoshis
+- Use `zecToZatoshi(1.5)` -> `150000000n`
+- Use `zatoshiToZec(zatoshi(150000000n))` -> `1.5`
+
+### Where Conversions Happen
+
+| Location | Format | Why |
+|----------|--------|-----|
+| Public API | `Zatoshi` (bigint) | Type safety, no rounding |
+| Internal logic | `Zatoshi` (bigint) | Exact math |
+| Storage/JSON | `ZatoshiString` | JSON.stringify safe |
+| RPC boundary | `"1.50000000"` | zcashd expects string |
+
+### Example
+
+```typescript
+import { zatoshi, zecToZatoshi, createExchangeSDK } from 'exchange-shielded-sdk';
+
+const sdk = createExchangeSDK({ /* config */ });
+
+// Type-safe amount creation
+const amount = zatoshi(150_000_000n);  // 1.5 ZEC
+
+// OR convert from ZEC
+const amount2 = zecToZatoshi(1.5);     // Also 1.5 ZEC
+
+// SDK requires Zatoshi type
+const result = await sdk.processWithdrawal({
+  userId: 'user-123',
+  fromAddress: 'zs1...',
+  toAddress: 'zs1...',
+  amount: zatoshi(150_000_000n),  // Type-safe
+});
+```
+
+### JSON Serialization
+
+```typescript
+import { safeJsonStringify, safeJsonParse } from 'exchange-shielded-sdk';
+
+// Serialize (bigint -> string)
+const json = safeJsonStringify({ amount: zatoshi(100n) });
+// -> '{"amount":"100"}'
+
+// Parse (string -> bigint)
+const obj = safeJsonParse(json, ['amount']);
+// -> { amount: 100n }
+```
+
 ## Production Deployment
 
 > **WARNING**: The SDK ships with in-memory storage implementations that are NOT suitable for production use. Production deployments MUST provide persistent storage adapters.

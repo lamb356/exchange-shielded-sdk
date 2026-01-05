@@ -17,6 +17,8 @@ export {
   parseAmountToZatoshis,
   addZatoshis,
   subtractZatoshis,
+  safeJsonStringify,
+  safeJsonParse,
 } from './amounts.js';
 
 export {

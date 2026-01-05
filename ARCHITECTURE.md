@@ -41,6 +41,47 @@ const zec = zatoshisToZec(1_050_000_000n);  // 10.5
 - Matches blockchain representation (satoshi-equivalent)
 - Type safety prevents mixing ZEC and zatoshi values
 
+## Money Types
+
+### Why Branded Types?
+
+TypeScript's bigint is great for precision, but doesn't prevent mixing units:
+
+```typescript
+// Without branded types - easy to make mistakes
+const zatoshis: bigint = 100_000_000n;  // 1 ZEC
+const zec: bigint = 1n;                  // Also 1 ZEC?
+const total = zatoshis + zec;            // Bug! Mixed units
+```
+
+With branded types:
+```typescript
+const zatoshis: Zatoshi = zatoshi(100_000_000n);
+const zec: bigint = 1n;
+const total = zatoshis + zec;  // Type error! Can't add Zatoshi + bigint
+```
+
+### JSON Serialization Strategy
+
+JavaScript's `JSON.stringify()` throws on bigint. Our strategy:
+
+1. **Storage adapters**: Use `safeJsonStringify()` which converts bigint -> string
+2. **Parsing**: Use `safeJsonParse(json, ['amount', 'fee'])` to convert string -> bigint
+3. **RPC boundary**: Convert to ZEC string with 8 decimals: `(Number(z) / 1e8).toFixed(8)`
+
+### Single Conversion Point
+
+All numeric conversions happen at the RPC boundary in `prepareZSendmany()`:
+
+```
+User Input -> Zatoshi -> Internal Logic -> Zatoshi -> prepareZSendmany() -> "1.50000000" -> zcashd
+```
+
+This ensures:
+- No floating-point math anywhere in business logic
+- Single place to audit for conversion errors
+- Type system enforces correct usage
+
 ### 2. Storage Adapter Pattern
 
 **Why**: Production deployments need persistent, distributed storage. Development/testing needs simple, fast storage.
